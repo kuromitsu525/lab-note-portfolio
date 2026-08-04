@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Note</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<header>
+    <h1>Lab Note</h1>
+</header>
+
+<main>
+
+    <section class="record-area">
+
+        <h2>録音</h2>
+
+        <button id="startButton">
+            録音開始
+        </button>
+
+        <button id="stopButton" disabled>
+            録音停止
+        </button>
+
+        <p>
+            録音時間：
+            <span id="timer">00:00</span>
+        </p>
+
+        <div id="audioArea"></div>
+
+    </section>
+
+</main>
+
+<script src="script.js"></script>
+
+</body>
+</html>
