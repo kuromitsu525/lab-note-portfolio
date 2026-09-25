@@ -1,0 +1,7 @@
+# Copy this file to .dev.vars and replace the placeholders locally.
+# Never commit the real .dev.vars file.
+RUSTFS_ACCESS_KEY=your-access-key
+RUSTFS_SECRET_KEY=your-secret-key
+RUSTFS_ENDPOINT=https://s3.example.com
+RUSTFS_REGION=us-east-1
+RUSTFS_BUCKET=lab-note
