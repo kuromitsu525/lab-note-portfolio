@@ -6,39 +6,79 @@
     <title>Lab Note</title>
     <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
+    <header class="app-header">
+        <div class="header-inner">
+            <div class="brand" aria-label="Lab Note">
+                <span class="brand-mark" aria-hidden="true">L</span>
+                <span>Lab Note</span>
+            </div>
+        </div>
+    </header>
 
-<header>
-    <h1>Lab Note</h1>
-</header>
+    <main>
+        <div id="generateTab">
+            <div class="workspace-grid">
+                <div class="workspace-main">
+                    <section class="panel meeting-area">
+                        <div class="section-heading">
+                            <span class="step-number">1</span>
+                            <div><h2>報告会・報告者</h2></div>
+                        </div>
+                        <label for="meetingGroup">報告会</label>
+                        <div class="select-wrap">
+                            <select id="meetingGroup">
+                                <option value="">選択してください</option>
+                                <option value="3年セミナー">3年セミナー</option>
+                                <option value="HCI班">HCI班</option>
+                                <option value="HAR班">HAR班</option>
+                                <option value="LBS班">LBS班</option>
+                            </select>
+                        </div>
+                        <label class="member-label">報告者</label>
+                        <div id="memberButtons" class="member-buttons"></div>
+                        <p id="selectedSpeaker" class="selected-speaker">報告者を選択してください</p>
+                    </section>
 
-<main>
+                    <section class="panel record-area">
+                        <div class="section-heading">
+                            <span class="step-number">2</span>
+                            <div><h2>録音・文字起こし</h2></div>
+                        </div>
+                        <div class="recorder-console">
+                            <div class="timer-block"><span class="timer-label">録音時間</span><span id="timer">00:00</span></div>
+                            <div class="record-actions">
+                                <button type="button" id="startButton"><span class="record-icon" aria-hidden="true"></span>録音開始</button>
+                                <button type="button" id="stopButton" disabled><span class="stop-icon" aria-hidden="true"></span>録音停止</button>
+                            </div>
+                        </div>
+                        <div id="audioArea"></div>
+                        <div class="transcript-heading"><h3>文字起こし結果</h3><span>録音中に自動更新されます</span></div>
+                        <textarea id="transcript" placeholder="ここに文字起こし結果が表示されます" readonly></textarea>
+                    </section>
+                </div>
 
-    <section class="record-area">
-
-        <h2>録音</h2>
-
-        <button id="startButton">
-            録音開始
-        </button>
-
-        <button id="stopButton" disabled>
-            録音停止
-        </button>
-
-        <p>
-            録音時間：
-            <span id="timer">00:00</span>
-        </p>
-
-        <div id="audioArea"></div>
-
-    </section>
-
-</main>
-
-<script src="script.js"></script>
-
+                <aside class="workspace-side">
+                    <section class="panel report-list-area">
+                        <div class="section-heading compact">
+                            <span class="step-number">3</span>
+                            <div><h2>報告状況</h2></div>
+                        </div>
+                        <div id="reportList" class="report-list-empty">報告会を選択してください</div>
+                    </section>
+                    <section class="panel completion-area">
+                        <p class="completion-label">全員の報告が終わったら</p>
+                        <button type="button" id="generateButton" disabled>議事録を生成</button>
+                        <p class="completion-note">文字起こしを報告者ごとに保存し、議事録用データを確定します。</p>
+                    </section>
+                    <section class="reset-area">
+                        <button type="button" id="clearDraftButton" class="danger-button">新しい報告会を開始</button>
+                        <p>現在の録音・文字起こしデータを消去します</p>
+                    </section>
+                </aside>
+            </div>
+        </div>
+    </main>
+    <script src="script.js"></script>
 </body>
 </html>
