@@ -1,9 +1,10 @@
 import { AwsClient } from "aws4fetch";
 
-const allowedOrigin = "http://127.0.0.1:5501";
+const allowedOrigin = "http://127.0.0.1:53101";
 const allowedGroups = new Set(["seminar3", "hci", "har", "lbs"]);
 const allowedKinds = new Set(["audio", "transcript"]);
 const allowedExtensions = new Set(["webm", "mp4", "ogg", "txt"]);
+const allowedTranscriptKeyPattern = /^(seminar3|hci|har|lbs)\/\d{4}年\/(?:[1-9]|1[0-2])月\/(?:[1-9]|[12]\d|3[01])日\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/;
 
 function corsHeaders() {
     return {
@@ -24,6 +25,11 @@ function isValidDate(value) {
 
 function isValidSpeaker(value) {
     return typeof value === "string" && /^[a-z0-9-]+$/.test(value);
+}
+
+function getDateFolderPath(date) {
+    const [year, month, day] = date.split("-");
+    return `${year}年/${Number(month)}月/${Number(day)}日`;
 }
 
 function getRustFsConfig(env) {
@@ -68,7 +74,32 @@ async function createSignedUrl(request, env) {
         return json({ error: "JSON形式のリクエストが必要です。" }, 400);
     }
 
-    const { operation, group, date, speaker, kind, extension, number } = body;
+    const {
+        operation, group, date, speaker, kind, extension, number,
+        key: requestedKey
+    } = body;
+
+    if (operation === "get") {
+        if (typeof requestedKey !== "string" ||
+            !allowedTranscriptKeyPattern.test(requestedKey)) {
+            return json({ error: "読み取り対象の指定が正しくありません。" }, 400);
+        }
+
+        const config = getRustFsConfig(env);
+        const aws = createAwsClient(config);
+        const encodedKey = requestedKey.split("/").map(encodeURIComponent).join("/");
+        const url = new URL(
+            `${config.endpoint}/${encodeURIComponent(config.bucket)}/${encodedKey}`
+        );
+        url.searchParams.set("X-Amz-Expires", "86400");
+
+        const signedRequest = await aws.sign(url.toString(), {
+            method: "GET",
+            aws: { signQuery: true }
+        });
+
+        return json({ url: signedRequest.url, key: requestedKey });
+    }
 
     if (!allowedGroups.has(group) || !isValidDate(date) ||
         !isValidSpeaker(speaker) || !allowedKinds.has(kind)) {
@@ -77,7 +108,7 @@ async function createSignedUrl(request, env) {
 
     const config = getRustFsConfig(env);
     const aws = createAwsClient(config);
-    const prefix = `${group}/${date}/${speaker}_${kind}_`;
+    const prefix = `${group}/${getDateFolderPath(date)}/${speaker}_${kind}_`;
 
     if (operation === "list") {
         const url = new URL(`${config.endpoint}/${encodeURIComponent(config.bucket)}`);
