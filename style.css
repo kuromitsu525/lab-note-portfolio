@@ -65,17 +65,24 @@ select:hover:not(:disabled) { border-color: var(--primary); }
 .member-buttons button.active { color: white; background: var(--primary); border-color: var(--primary); box-shadow: 0 5px 12px rgba(8,127,140,.2); }
 .selected-speaker { margin: 13px 0 0; padding: 9px 12px; color: var(--muted); background: var(--soft); border-left: 3px solid var(--line); border-radius: 4px 8px 8px 4px; font-size: 13px; }
 
+.recording-date-field { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.recording-date-field label { margin: 0; white-space: nowrap; }
+#recordingDate { min-height: 41px; padding: 7px 11px; color: var(--text); background: var(--surface); border: 1px solid #cbd8dd; border-radius: 9px; font: inherit; }
+#recordingDate:hover:not(:disabled), #recordingDate:focus { border-color: var(--primary); outline: none; }
+
 .recorder-console { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 19px 20px; background: #162a32; border-radius: 14px; }
 .timer-block { display: grid; min-width: 115px; }
 .timer-label { color: #a9bbc2; font-size: 11px; letter-spacing: .06em; }
 #timer { color: white; font-variant-numeric: tabular-nums; font-size: 29px; font-weight: 680; letter-spacing: .04em; line-height: 1.35; }
-.record-actions { display: flex; gap: 9px; }
-#startButton, #stopButton, #generateButton, .danger-button { border-radius: 10px; font-weight: 700; cursor: pointer; }
-#startButton, #stopButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 9px 16px; border: 1px solid transparent; }
+.record-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+#startButton, #stopButton, #uploadButton, .danger-button { border-radius: 10px; font-weight: 700; cursor: pointer; }
+#startButton, #stopButton, #uploadButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 9px 16px; border: 1px solid transparent; }
 #startButton { color: #183139; background: white; }
 #startButton:hover:not(:disabled) { background: #edf9f9; transform: translateY(-1px); }
 #stopButton { color: white; background: var(--danger); }
 #stopButton:hover:not(:disabled) { background: #b83242; transform: translateY(-1px); }
+#uploadButton { color: white; background: var(--primary); }
+#uploadButton:hover:not(:disabled) { background: var(--primary-dark); transform: translateY(-1px); }
 .record-icon { width: 11px; height: 11px; background: var(--danger); border-radius: 50%; }
 .stop-icon { width: 10px; height: 10px; background: currentColor; border-radius: 2px; }
 button:disabled, select:disabled { cursor: not-allowed; opacity: .45; }
@@ -94,16 +101,23 @@ textarea::placeholder { color: #96a3a9; }
 .report-item { position: relative; padding: 12px 0; border-bottom: 1px solid #e8eef0; }
 .report-item:last-child { border-bottom: none; }
 .report-item strong { color: var(--text); font-size: 13px; }
-.details-button { float: right; padding: 3px 9px; font-size: 11px; }
+.report-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.report-item-controls { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.report-status { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.report-status:is(a) { text-decoration: none; }
+.report-status:is(a):hover { box-shadow: 0 0 0 2px rgba(37,114,59,.18); transform: translateY(-1px); }
+.report-status.not-recorded { color: #708087; background: #edf1f2; }
+.report-status.recorded { color: #775c11; background: #fff4ca; }
+.report-status.processing { color: #086875; background: #dff4f5; }
+.report-status.completed { color: #25723b; background: #e2f5e7; }
+.report-status.failed { color: #a32d3c; background: #fde8eb; }
+.status-spinner { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: status-spin .75s linear infinite; }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+.details-button { padding: 3px 9px; white-space: nowrap; font-size: 11px; }
 .details-button:hover { color: var(--primary-dark); background: var(--primary-soft); }
 .report-details { clear: both; max-height: 160px; margin: 10px 0 0; padding: 10px; overflow-y: auto; white-space: pre-wrap; color: #53656d; background: var(--soft); border-radius: 8px; font-size: 12px; }
 .report-details[hidden] { display: none; }
 
-.completion-area { color: white; background: linear-gradient(145deg,#087f8c,#086875); border: none; }
-.completion-label { margin: 0 0 10px; color: #cde9eb; font-size: 12px; font-weight: 650; }
-#generateButton { width: 100%; min-height: 47px; padding: 10px 18px; color: var(--primary-dark); background: white; border: 0; font-size: 15px; }
-#generateButton:hover:not(:disabled) { box-shadow: 0 7px 18px rgba(0,0,0,.16); transform: translateY(-1px); }
-.completion-note { margin: 11px 0 0; color: #cde3e5; font-size: 11px; line-height: 1.6; }
 .reset-area { padding: 4px 8px; text-align: center; }
 .danger-button { padding: 7px 13px; color: var(--danger); background: transparent; border: 1px solid transparent; font-size: 12px; }
 .danger-button:hover:not(:disabled) { background: #fff1f2; border-color: #f2cbd0; }
@@ -126,5 +140,6 @@ textarea::placeholder { color: #96a3a9; }
     .workspace-side { grid-template-columns: 1fr; }
     .recorder-console { align-items: stretch; flex-direction: column; }
     .record-actions button { flex: 1; }
+    #uploadButton { flex-basis: 100%; }
     .transcript-heading span { display: none; }
 }

@@ -1,0 +1,3 @@
+# Copy this file to .dev.vars and set the esa API token locally.
+# Never commit the real .dev.vars file.
+ESA_ACCESS_TOKEN=your-esa-access-token

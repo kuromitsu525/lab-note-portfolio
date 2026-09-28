@@ -1,0 +1,15 @@
+{
+  "name": "restless-shadow-92dd",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 53104",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "hono": "^4.13.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.110.0"
+  }
+}

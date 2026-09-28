@@ -74,8 +74,33 @@ describe("Lab Note worker", () => {
 		const result = await response.json();
 
 		expect(response.status).toBe(200);
-		expect(result.key).toBe("hci/2026-09-18/fuseya_audio_01.webm");
+		expect(result.key).toBe("hci/2026年/9月/18日/fuseya_audio_01.webm");
 		expect(result.url).toContain("X-Amz-Expires=300");
 		expect(result.url).not.toContain(testEnv.RUSTFS_SECRET_KEY);
+	});
+
+	it("creates a signed URL for reading a transcript", async () => {
+		const request = new Request("http://example.com/api/rustfs/presign", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				operation: "get",
+				key: "hci/2026年/9月/28日/fuseya_transcript_01.txt",
+			}),
+		});
+		const testEnv = {
+			RUSTFS_ACCESS_KEY: "TESTACCESSKEY",
+			RUSTFS_SECRET_KEY: "test-secret-key",
+			RUSTFS_ENDPOINT: "https://s3.kajilab.dev",
+			RUSTFS_REGION: "us-east-1",
+			RUSTFS_BUCKET: "lab-note",
+		};
+
+		const response = await worker.fetch(request, testEnv);
+		const result = await response.json();
+
+		expect(response.status).toBe(200);
+		expect(result.key).toBe("hci/2026年/9月/28日/fuseya_transcript_01.txt");
+		expect(result.url).toContain("X-Amz-Expires=86400");
 	});
 });

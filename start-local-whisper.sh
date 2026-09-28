@@ -21,7 +21,7 @@ cd "${WHISPER_DIRECTORY}"
 
 exec "${SERVER_BINARY}" \
     --host 0.0.0.0 \
-    --port 8080 \
+    --port 53102 \
     --model "${MODEL_FILE}" \
     --language ja \
     --threads 4 \

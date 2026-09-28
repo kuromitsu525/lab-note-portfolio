@@ -45,11 +45,16 @@
                             <span class="step-number">2</span>
                             <div><h2>録音・文字起こし</h2></div>
                         </div>
+                        <div class="recording-date-field">
+                            <label for="recordingDate">録音日</label>
+                            <input type="date" id="recordingDate">
+                        </div>
                         <div class="recorder-console">
                             <div class="timer-block"><span class="timer-label">録音時間</span><span id="timer">00:00</span></div>
                             <div class="record-actions">
                                 <button type="button" id="startButton"><span class="record-icon" aria-hidden="true"></span>録音開始</button>
                                 <button type="button" id="stopButton" disabled><span class="stop-icon" aria-hidden="true"></span>録音停止</button>
+                                <button type="button" id="uploadButton" disabled>音声・テキストをアップロード</button>
                             </div>
                         </div>
                         <div id="audioArea"></div>
@@ -65,11 +70,6 @@
                             <div><h2>報告状況</h2></div>
                         </div>
                         <div id="reportList" class="report-list-empty">報告会を選択してください</div>
-                    </section>
-                    <section class="panel completion-area">
-                        <p class="completion-label">全員の報告が終わったら</p>
-                        <button type="button" id="generateButton" disabled>議事録を生成</button>
-                        <p class="completion-note">文字起こしを報告者ごとに保存し、議事録用データを確定します。</p>
                     </section>
                     <section class="reset-area">
                         <button type="button" id="clearDraftButton" class="danger-button">新しい報告会を開始</button>

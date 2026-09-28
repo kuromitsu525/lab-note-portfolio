@@ -4,11 +4,12 @@
 
 const startButton = document.getElementById("startButton");
 const stopButton = document.getElementById("stopButton");
+const uploadButton = document.getElementById("uploadButton");
+const recordingDate = document.getElementById("recordingDate");
 const timer = document.getElementById("timer");
 const audioArea = document.getElementById("audioArea");
 const transcriptionResult = document.getElementById("transcriptionResult");
 const transcript = document.getElementById("transcript");
-const generateButton = document.getElementById("generateButton");
 const meetingGroup = document.getElementById("meetingGroup");
 const memberButtons = document.getElementById("memberButtons");
 const selectedSpeaker = document.getElementById("selectedSpeaker");
@@ -37,14 +38,14 @@ const rustFsGroupNames = {
     "LBS班": "lbs"
 };
 
-const workerBaseURL = `http://${location.hostname || "127.0.0.1"}:8787`;
+const workerBaseURL = `http://${location.hostname || "127.0.0.1"}:53103`;
+const aiWorkerBaseURL = `http://${location.hostname || "127.0.0.1"}:53104`;
 
 // 録音停止後、議事録生成まで一時的に保持するデータ
 const reportRecords = new Map();
 
 let activeSpeaker = "";
 let currentReportSegment = null;
-let savedMeetingData = null;
 
 const reportDatabaseName = "lab-note-draft";
 const reportStoreName = "meeting-state";
@@ -77,6 +78,7 @@ async function saveDraftToBrowser() {
 
         store.put({
             selectedGroup: meetingGroup.value,
+            selectedRecordingDate: recordingDate.value,
             records: Array.from(reportRecords.entries())
         }, "current-draft");
 
@@ -116,6 +118,11 @@ async function restoreDraftFromBrowser() {
 
         if (meetingGroups[draft.selectedGroup]) {
             meetingGroup.value = draft.selectedGroup;
+        }
+
+        if (draft.selectedRecordingDate &&
+            draft.selectedRecordingDate <= getJapanDateString()) {
+            recordingDate.value = draft.selectedRecordingDate;
         }
 
         renderMemberButtons();
@@ -160,7 +167,7 @@ let mediaRecorderProcessingPromise = Promise.resolve();
 
 let isCompletingTranscription = false;
 
-const localWhisperBaseURL = `http://${location.hostname}:8080`;
+const localWhisperBaseURL = `http://${location.hostname}:53102`;
 const localWhisperChunkMilliseconds = 8000;
 const localWhisperOverlapSamples = 16000;
 // ほぼ無音の区間をWhisperへ送らず、無音時の定型文の誤生成を抑える
@@ -203,11 +210,14 @@ let elapsedSeconds = 0;
 
 transcript.value = "";
 
-generateButton.disabled = true;
+recordingDate.max = getJapanDateString();
+recordingDate.value = getJapanDateString();
 
 stopButton.disabled = true;
 
 startButton.disabled = true;
+
+uploadButton.disabled = true;
 
 
 // ============================================================
@@ -229,16 +239,62 @@ function getSavedTranscript(group, speaker) {
         .join("\n\n");
 }
 
-function hasReportData(group) {
-    return Boolean(group) && meetingGroups[group].some(
-        speaker => getSpeakerSegments(group, speaker).length > 0
+function updateUploadButtonState() {
+    const segments = activeSpeaker
+        ? getSpeakerSegments(meetingGroup.value, activeSpeaker)
+        : [];
+    const hasPendingAudio = segments.some(
+        segment => segment.audioBlob && segment.audioUploadStatus !== "uploaded"
     );
+    const hasPendingTranscript = segments.some(
+        segment => !segment.transcriptUploadedAt
+    );
+    const hasPendingAi = segments.some(
+        segment => !segment.aiQueuedAt || segment.aiQueueStatus === "failed"
+    );
+    const hasFailedAi = segments.some(segment => segment.aiQueueStatus === "failed");
+
+    uploadButton.disabled = isRecording || !activeSpeaker ||
+        (!hasPendingAudio && !hasPendingTranscript && !hasPendingAi);
+    uploadButton.textContent = hasFailedAi && !hasPendingAudio && !hasPendingTranscript
+        ? "AI処理を再実行"
+        : "音声・テキストをアップロード";
+}
+
+function getSpeakerStatus(segments) {
+    if (segments.length === 0) {
+        return { label: "未録音", processing: false, className: "not-recorded" };
+    }
+
+    if (segments.some(segment => !segment.aiQueuedAt)) {
+        return { label: "録音済み", processing: false, className: "recorded" };
+    }
+
+    const latestStatus = [...segments]
+        .reverse()
+        .find(segment => segment.aiQueueStatus)?.aiQueueStatus;
+
+    const statuses = {
+        queued: { label: "AI生成待ち", processing: true, className: "processing" },
+        processing: { label: "AI生成中", processing: true, className: "processing" },
+        retrying: { label: "AI再試行中", processing: true, className: "processing" },
+        completed: { label: "esa投稿済み", processing: false, className: "completed" },
+        failed: { label: "AI処理失敗", processing: false, className: "failed" }
+    };
+
+    return statuses[latestStatus] ||
+        { label: "録音済み", processing: false, className: "recorded" };
 }
 
 function getJapanDateString(value = new Date()) {
     return new Date(value).toLocaleDateString("sv-SE", {
         timeZone: "Asia/Tokyo"
     });
+}
+
+function getRustFsDateFolderPath(date) {
+    const [year, month, day] = date.split("-");
+    return `${year}年/${Number(month)}月/${Number(day)}日`;
 }
 
 async function requestRustFsSignedUrl(payload) {
@@ -254,6 +310,93 @@ async function requestRustFsSignedUrl(payload) {
     }
 
     return result;
+}
+
+async function enqueueMinutesGeneration(payload) {
+    const response = await fetch(`${aiWorkerBaseURL}/api/enqueue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || !result.jobId) {
+        throw new Error(result.error || `AI処理の登録に失敗しました（HTTP ${response.status}）`);
+    }
+
+    return result;
+}
+
+let isPollingAiStatuses = false;
+
+async function refreshAiJobStatuses() {
+    if (isPollingAiStatuses) {
+        return;
+    }
+
+    const jobIds = new Set();
+    reportRecords.forEach(segments => {
+        segments.forEach(segment => {
+            if (segment.aiJobId &&
+                segment.aiQueueStatus !== "failed" &&
+                (segment.aiQueueStatus !== "completed" || !segment.aiEsaUrl)) {
+                jobIds.add(segment.aiJobId);
+            }
+        });
+    });
+
+    if (jobIds.size === 0) {
+        return;
+    }
+
+    isPollingAiStatuses = true;
+    let changed = false;
+
+    try {
+        for (const jobId of jobIds) {
+            try {
+                const response = await fetch(
+                    `${aiWorkerBaseURL}/api/status/${encodeURIComponent(jobId)}`,
+                    { cache: "no-store" }
+                );
+
+                if (!response.ok) {
+                    continue;
+                }
+
+                const result = await response.json();
+                const resolvedEsaUrl = result.esaUrl || (
+                    result.esaPostNumber
+                        ? `https://kjlb.esa.io/posts/${result.esaPostNumber}`
+                        : ""
+                );
+                reportRecords.forEach(segments => {
+                    segments.forEach(segment => {
+                        if (segment.aiJobId === jobId && (
+                            segment.aiQueueStatus !== result.status ||
+                            segment.aiEsaUrl !== resolvedEsaUrl
+                        )) {
+                            segment.aiQueueStatus = result.status;
+                            segment.aiStatusError = result.error || "";
+                            segment.aiEsaUrl = resolvedEsaUrl;
+                            segment.aiEsaPostNumber = result.esaPostNumber || null;
+                            changed = true;
+                        }
+                    });
+                });
+            } catch (error) {
+                console.warn("AI処理状況を取得できませんでした:", error);
+            }
+        }
+
+        if (changed) {
+            await saveDraftToBrowser();
+            renderReportList();
+            updateUploadButtonState();
+        }
+    } finally {
+        isPollingAiStatuses = false;
+    }
 }
 
 async function getNextRustFsFileNumber({ group, date, speaker, kind }) {
@@ -275,7 +418,7 @@ async function getNextRustFsFileNumber({ group, date, speaker, kind }) {
         throw new Error("RustFSのファイル一覧を読み取れませんでした。");
     }
 
-    const prefix = `${group}/${date}/${speaker}_${kind}_`;
+    const prefix = `${group}/${getRustFsDateFolderPath(date)}/${speaker}_${kind}_`;
     const numbers = Array.from(document.getElementsByTagName("Key"))
         .map(element => element.textContent || "")
         .filter(key => key.startsWith(prefix))
@@ -337,12 +480,46 @@ function renderReportList() {
     meetingGroups[group].forEach(speaker => {
         const segments = getSpeakerSegments(group, speaker);
         const item = document.createElement("div");
+        const heading = document.createElement("div");
+        const controls = document.createElement("div");
         const name = document.createElement("strong");
+        let status = document.createElement("span");
         const text = document.createElement("p");
         const detailsButton = document.createElement("button");
 
         item.className = "report-item";
-        name.textContent = `${speaker}：${segments.length > 0 ? "録音済み" : "未録音"}`;
+        heading.className = "report-item-heading";
+        controls.className = "report-item-controls";
+        name.textContent = speaker;
+        const speakerStatus = getSpeakerStatus(segments);
+        const esaUrl = [...segments]
+            .reverse()
+            .find(segment => segment.aiEsaUrl)?.aiEsaUrl;
+
+        if (speakerStatus.className === "completed" && esaUrl) {
+            try {
+                const parsedUrl = new URL(esaUrl);
+                if (parsedUrl.protocol === "https:" && parsedUrl.hostname === "kjlb.esa.io") {
+                    status = document.createElement("a");
+                    status.href = parsedUrl.toString();
+                    status.target = "_blank";
+                    status.rel = "noopener noreferrer";
+                    status.title = "esaの記事を新しいタブで開く";
+                }
+            } catch {
+                // URLが不正な場合は通常のステータス表示にする
+            }
+        }
+
+        status.className = `report-status ${speakerStatus.className}`;
+        status.textContent = speakerStatus.label;
+
+        if (speakerStatus.processing) {
+            const spinner = document.createElement("span");
+            spinner.className = "status-spinner";
+            spinner.setAttribute("aria-hidden", "true");
+            status.prepend(spinner);
+        }
         text.className = "report-details";
         text.textContent = getSavedTranscript(group, speaker) || "文字起こしはまだありません";
         text.hidden = true;
@@ -355,10 +532,17 @@ function renderReportList() {
             detailsButton.textContent = text.hidden ? "詳細を見る" : "詳細を閉じる";
         });
 
-        item.appendChild(name);
+        heading.appendChild(name);
+        controls.appendChild(status);
 
         if (segments.length > 0) {
-            item.appendChild(detailsButton);
+            controls.appendChild(detailsButton);
+        }
+
+        heading.appendChild(controls);
+        item.appendChild(heading);
+
+        if (segments.length > 0) {
             item.appendChild(text);
         }
 
@@ -375,6 +559,7 @@ function selectSpeaker(speaker) {
     selectedSpeaker.textContent = `選択中の報告者：${speaker}`;
     transcript.value = getSavedTranscript(meetingGroup.value, speaker);
     startButton.disabled = false;
+    updateUploadButtonState();
 
     memberButtons.querySelectorAll("button").forEach(button => {
         button.classList.toggle("active", button.dataset.speaker === speaker);
@@ -389,6 +574,7 @@ function renderMemberButtons() {
     selectedSpeaker.textContent = "報告者を選択してください";
     transcript.value = "";
     startButton.disabled = true;
+    updateUploadButtonState();
 
     if (group) {
         meetingGroups[group].forEach(speaker => {
@@ -402,14 +588,23 @@ function renderMemberButtons() {
     }
 
     renderReportList();
-    generateButton.disabled = !hasReportData(group);
 }
 
 meetingGroup.addEventListener("change", () => {
     renderMemberButtons();
     saveDraftToBrowser();
 });
-restoreDraftFromBrowser();
+recordingDate.addEventListener("change", () => {
+    const today = getJapanDateString();
+
+    if (!recordingDate.value || recordingDate.value > today) {
+        recordingDate.value = today;
+    }
+
+    saveDraftToBrowser();
+});
+restoreDraftFromBrowser().then(refreshAiJobStatuses);
+setInterval(refreshAiJobStatuses, 5000);
 
 clearDraftButton.addEventListener("click", async () => {
     const shouldClear = confirm(
@@ -426,19 +621,18 @@ clearDraftButton.addEventListener("click", async () => {
         await clearDraftFromBrowser();
 
         reportRecords.clear();
-        savedMeetingData = null;
         activeSpeaker = "";
         currentReportSegment = null;
         finalTranscript = "";
 
         meetingGroup.value = "";
+        recordingDate.value = getJapanDateString();
         transcript.value = "";
         timer.textContent = "00:00";
         elapsedSeconds = 0;
         audioArea.innerHTML = "";
 
         renderMemberButtons();
-        generateButton.disabled = true;
         alert("保存していたデータを削除しました。");
     } catch (error) {
         alert("データを削除できませんでした。もう一度お試しください。");
@@ -595,14 +789,6 @@ function updateTranscriptDisplay() {
     transcript.scrollTop = transcript.scrollHeight;
 
 
-    // 確定文字が存在したら
-    // 議事録生成ボタンを有効化
-
-    generateButton.disabled =
-        isRecording || currentReportSegment !== null || (
-            !hasReportData(meetingGroup.value) &&
-            finalTranscript.trim().length === 0
-        );
 }
 
 
@@ -972,11 +1158,18 @@ startButton.addEventListener(
                 return;
             }
 
+            if (!recordingDate.value || recordingDate.value > getJapanDateString()) {
+                alert("録音日は今日以前の日付を選択してください。");
+                return;
+            }
+
             const reportGroup = meetingGroup.value;
             const reportSpeaker = activeSpeaker;
 
             startButton.disabled = true;
             clearDraftButton.disabled = true;
+            uploadButton.disabled = true;
+            recordingDate.disabled = true;
             meetingGroup.disabled = true;
             memberButtons.querySelectorAll("button").forEach(button => {
                 button.disabled = true;
@@ -999,10 +1192,6 @@ startButton.addEventListener(
             localTranscriptionError = null;
 
             transcript.value = "";
-
-            generateButton.disabled =
-                true;
-
 
             // ------------------------------------------------
             // マイク取得
@@ -1065,6 +1254,7 @@ startButton.addEventListener(
                 startedAt: new Date().toISOString(),
                 endedAt: null,
                 durationSeconds: 0,
+                meetingDate: recordingDate.value,
                 audioBlob: null,
                 audioMimeType: "",
                 cancelled: false
@@ -1137,20 +1327,10 @@ startButton.addEventListener(
                         "bytes"
                     );
 
-                    // 録音データは各録音の停止時点で保存する
-                    let extension = "webm";
-                    if (actualMimeType.includes("mp4")) {
-                        extension = "mp4";
-                    } else if (actualMimeType.includes("ogg")) {
-                        extension = "ogg";
-                    }
-
-                    const recordingDate = getJapanDateString(reportSegment.startedAt);
-
-                    // アップロードが失敗しても再送できるようブラウザ内にも保持する
+                    // アップロードボタンを押すまでブラウザ内に保持する
                     reportSegment.audioBlob = audioBlob;
                     reportSegment.audioMimeType = actualMimeType;
-                    reportSegment.audioUploadStatus = "uploading";
+                    reportSegment.audioUploadStatus = "pending";
                     reportSegment.audioStorageKey = "";
 
                     const key = getReportKey(
@@ -1160,31 +1340,6 @@ startButton.addEventListener(
                     const segments = reportRecords.get(key) || [];
                     segments.push(reportSegment);
                     reportRecords.set(key, segments);
-                    await saveDraftToBrowser();
-
-                    try {
-                        reportSegment.audioStorageKey = await uploadFileToRustFs({
-                            meetingGroupName: reportSegment.group,
-                            date: recordingDate,
-                            speaker: reportSegment.speaker,
-                            kind: "audio",
-                            extension,
-                            blob: audioBlob
-                        });
-                        reportSegment.audioUploadStatus = "uploaded";
-                        console.log(
-                            "RustFSへ音声を保存しました:",
-                            reportSegment.audioStorageKey
-                        );
-                    } catch (error) {
-                        reportSegment.audioUploadStatus = "failed";
-                        console.error("音声のRustFSアップロードに失敗しました:", error);
-                        alert(
-                            "音声をRustFSへアップロードできませんでした。" +
-                            "データはブラウザ内に残っています。" +
-                            `\n詳細: ${error instanceof Error ? error.message : String(error)}`
-                        );
-                    }
                     await saveDraftToBrowser();
 
 
@@ -1226,9 +1381,11 @@ startButton.addEventListener(
                         startButton.disabled = false;
                         clearDraftButton.disabled = false;
                         meetingGroup.disabled = false;
+                        recordingDate.disabled = false;
                         memberButtons.querySelectorAll("button").forEach(button => {
                             button.disabled = false;
                         });
+                        updateUploadButtonState();
                     }
 
 
@@ -1283,6 +1440,8 @@ startButton.addEventListener(
 
             stopButton.disabled =
                 false;
+
+            uploadButton.disabled = true;
 
 
             meetingGroup.disabled = true;
@@ -1397,10 +1556,12 @@ startButton.addEventListener(
                 true;
 
             clearDraftButton.disabled = false;
+            recordingDate.disabled = false;
             meetingGroup.disabled = false;
             memberButtons.querySelectorAll("button").forEach(button => {
                 button.disabled = false;
             });
+            updateUploadButtonState();
 
         }
 
@@ -1470,7 +1631,7 @@ stopButton.addEventListener(
             );
         }
 
-        // 音声Blobの作成・ブラウザ内保存・RustFSアップロードの完了を待つ
+        // 音声Blobの作成とブラウザ内保存の完了を待つ
         await mediaRecorderProcessingPromise;
 
         if (stoppingReportSegment) {
@@ -1504,11 +1665,12 @@ stopButton.addEventListener(
         startButton.disabled = false;
         clearDraftButton.disabled = false;
         meetingGroup.disabled = false;
+        recordingDate.disabled = false;
         memberButtons.querySelectorAll("button").forEach(button => {
             button.disabled = false;
         });
 
-        generateButton.disabled = !hasReportData(meetingGroup.value);
+        updateUploadButtonState();
 
 
         console.log(
@@ -1520,80 +1682,151 @@ stopButton.addEventListener(
 
 
 // ============================================================
-// 報告データ確定・文字起こし保存
+// 選択中の報告者の音声・文字起こしをRustFSへ保存
 // ============================================================
 
-generateButton.addEventListener("click", async () => {
+uploadButton.addEventListener("click", async () => {
     const group = meetingGroup.value;
+    const speaker = activeSpeaker;
+    const segments = getSpeakerSegments(group, speaker);
 
-    if (!group) {
-        alert("報告会を選択してください。");
+    if (!group || !speaker || segments.length === 0) {
+        alert("アップロードする報告者のデータがありません。");
         return;
     }
 
-    const reports = meetingGroups[group]
-        .map(speaker => ({
-            speaker,
-            segments: getSpeakerSegments(group, speaker)
-        }))
-        .filter(report => report.segments.length > 0);
+    const pendingAudioSegments = segments.filter(
+        segment => segment.audioBlob && segment.audioUploadStatus !== "uploaded"
+    );
+    const hasNewTranscript = segments.some(segment => !segment.transcriptUploadedAt);
+    const needsAiQueue = segments.some(
+        segment => !segment.aiQueuedAt || segment.aiQueueStatus === "failed"
+    );
+    const text = segments
+        .map(segment => segment.text.trim())
+        .filter(Boolean)
+        .join("\n\n");
 
-    if (reports.length === 0) {
-        alert("保存できる報告データがありません。");
+    if (pendingAudioSegments.length === 0 && !hasNewTranscript && !needsAiQueue) {
+        alert("この報告者のデータはアップロード済みで、AI処理も登録済みです。");
         return;
     }
 
-    savedMeetingData = {
-        group,
-        savedAt: new Date().toISOString(),
-        reports
-    };
+    uploadButton.disabled = true;
+    startButton.disabled = true;
+    meetingGroup.disabled = true;
+    memberButtons.querySelectorAll("button").forEach(button => {
+        button.disabled = true;
+    });
 
-    const firstSegment = reports
-        .flatMap(report => report.segments)
-        .sort((a, b) => a.startedAt.localeCompare(b.startedAt))[0];
-    const recordingDate = getJapanDateString(firstSegment.startedAt);
-    const uploadErrors = [];
+    const errors = [];
+    let transcriptStorageKey = [...segments]
+        .reverse()
+        .find(segment => segment.transcriptStorageKey)?.transcriptStorageKey || "";
+    let transcriptReadyForQueue = !hasNewTranscript && Boolean(transcriptStorageKey);
 
-    generateButton.disabled = true;
-
-    // AIへ渡すデータを確定するタイミングで、1人1ファイルにまとめて保存する
-    for (const report of reports) {
-        const text = report.segments
-            .map(segment => segment.text.trim())
-            .filter(Boolean)
-            .join("\n\n");
-
-        if (!text) {
-            continue;
+    for (const segment of pendingAudioSegments) {
+        let extension = "webm";
+        if (segment.audioMimeType.includes("mp4")) {
+            extension = "mp4";
+        } else if (segment.audioMimeType.includes("ogg")) {
+            extension = "ogg";
         }
 
+        segment.audioUploadStatus = "uploading";
+
         try {
-            report.transcriptStorageKey = await uploadFileToRustFs({
+            segment.audioStorageKey = await uploadFileToRustFs({
                 meetingGroupName: group,
-                date: recordingDate,
-                speaker: report.speaker,
+                date: segment.meetingDate || getJapanDateString(segment.startedAt),
+                speaker,
+                kind: "audio",
+                extension,
+                blob: segment.audioBlob
+            });
+            segment.audioUploadStatus = "uploaded";
+        } catch (error) {
+            segment.audioUploadStatus = "failed";
+            errors.push(`音声: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    if (hasNewTranscript) {
+        try {
+            const firstSegment = [...segments]
+                .sort((a, b) => a.startedAt.localeCompare(b.startedAt))[0];
+            transcriptStorageKey = await uploadFileToRustFs({
+                meetingGroupName: group,
+                date: firstSegment.meetingDate || getJapanDateString(firstSegment.startedAt),
+                speaker,
                 kind: "transcript",
                 extension: "txt",
                 blob: new Blob([text], { type: "text/plain;charset=utf-8" })
             });
+
+            const uploadedAt = new Date().toISOString();
+            segments.forEach(segment => {
+                segment.transcriptUploadedAt = uploadedAt;
+                segment.transcriptStorageKey = transcriptStorageKey;
+            });
+            transcriptReadyForQueue = true;
         } catch (error) {
-            uploadErrors.push({ speaker: report.speaker, error });
-            console.error(`${report.speaker}のテキスト保存に失敗しました:`, error);
+            errors.push(`テキスト: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
-    console.log("確定した報告会データ:", savedMeetingData);
+    if (needsAiQueue && transcriptReadyForQueue) {
+        try {
+            const readTarget = await requestRustFsSignedUrl({
+                operation: "get",
+                key: transcriptStorageKey
+            });
+            const firstSegment = [...segments]
+                .sort((a, b) => a.startedAt.localeCompare(b.startedAt))[0];
 
-    if (uploadErrors.length > 0) {
-        alert(
-            "一部の文字起こしをRustFSへ保存できませんでした。" +
-            "データはブラウザ内に残っています。\n" +
-            `失敗: ${uploadErrors.map(item => item.speaker).join(", ")}`
-        );
-    } else {
-        alert("文字起こしデータを報告者ごとにRustFSへ保存しました。");
+            const queueResult = await enqueueMinutesGeneration({
+                templateKey: rustFsGroupNames[group],
+                speaker,
+                meetingDate: firstSegment.meetingDate || getJapanDateString(firstSegment.startedAt),
+                transcriptUrl: readTarget.url
+            });
+
+            const queuedAt = new Date().toISOString();
+            segments.forEach(segment => {
+                segment.aiQueuedAt = queuedAt;
+                segment.aiQueueStatus = "queued";
+                segment.aiJobId = queueResult.jobId;
+                segment.aiStatusError = "";
+            });
+        } catch (error) {
+            segments.forEach(segment => {
+                if (!segment.aiQueuedAt) {
+                    segment.aiQueueStatus = "failed";
+                }
+            });
+            errors.push(`AI処理: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
-    generateButton.disabled = !hasReportData(group);
+    await saveDraftToBrowser();
+    renderReportList();
+
+    startButton.disabled = false;
+    meetingGroup.disabled = false;
+    memberButtons.querySelectorAll("button").forEach(button => {
+        button.disabled = false;
+    });
+    updateUploadButtonState();
+
+    if (errors.length > 0) {
+        alert(
+            "一部のデータをRustFSへアップロードできませんでした。" +
+            "データはブラウザ内に残っています。\n" + errors.join("\n")
+        );
+    } else {
+        alert(
+            `${speaker}の音声と文字起こしをRustFSへアップロードし、` +
+            "AIによる要約とesaへの反映を受け付けました。"
+        );
+    }
 });
