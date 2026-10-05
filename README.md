@@ -14,7 +14,10 @@ GitHubには含まれていません。初めて使用するPCでは、プロジ
 
 ```bash
 git clone https://github.com/ggml-org/whisper.cpp.git vendor/whisper.cpp
+git -C vendor/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
 ```
+
+他のPCでも同じ実装を使うため、取得後に下記の確認済みコミットへそろえます。
 
 #### whisper-serverのビルド
 
@@ -36,6 +39,59 @@ vendor/whisper.cpp/build/bin/whisper-server
 vendor/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
 ```
 
+#### whisper.cppのバージョンとモデルのハッシュ値
+
+2026年10月6日に開発PCで確認した基準値です。
+本体のコミットIDはプログラムの版、モデルのSHA-256はファイル内容を識別します。
+この2つを互いに比較せず、相手のPCの同じ項目と比較してください。
+
+| 項目 | 確認した値 |
+| --- | --- |
+| whisper.cppのソース上のバージョン | `1.9.4-dev`（正式リリースのタグではなく、下記コミットで指定） |
+| whisper.cppのコミットID | `1da4dc82fa7996d4edda05890dca65aeceaafd6d` |
+| モデル | Kotoba-Whisper v2.0、GGML形式、`q5_0`量子化 |
+| モデルファイル名 | `ggml-kotoba-whisper-v2.0-q5_0.bin` |
+
+モデルファイルのSHA-256：
+
+```text
+4a3b92192b5d3578ff854a5876213e2e27af0c2d357492c2d14271e82c303658
+```
+
+プロジェクトのルートで次を実行します。
+
+```bash
+git -C vendor/whisper.cpp rev-parse HEAD
+git -C vendor/whisper.cpp status --short
+shasum -a 256 vendor/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+```
+
+`rev-parse HEAD` の結果は上記コミットIDと比較します。
+`status --short` が何も表示しなければ、本体のソースにローカル変更はありません。
+`shasum` の結果は、ファイル名の前に表示されるハッシュ値を上記SHA-256と比較します。
+Linuxでは `shasum -a 256` の代わりに `sha256sum` も使えます。
+
+既に別の版を取得している場合は、本体の変更を確認・退避してから、次の手順で
+コミットをそろえて再ビルドしてください。コミットを変えるだけでは、以前に
+ビルドした実行ファイルは更新されません。Whisperサーバーは停止してから作業します。
+
+```bash
+git -C vendor/whisper.cpp fetch origin
+git -C vendor/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
+cmake -S vendor/whisper.cpp -B vendor/whisper.cpp/build
+cmake --build vendor/whisper.cpp/build --config Release -j
+```
+
+モデルのSHA-256が異なる場合は、ダウンロードした版・量子化形式が同じか、
+ダウンロードが完了しているかを確認してください。ファイル名が同じでも、
+中身が同じとは限りません。上のダウンロードURLは `main` を参照するため、
+取得後に必ずハッシュ値も確認してください。
+
+Webアプリで使うモデルは `start-local-whisper.sh` の `MODEL_FILE` で指定しています。
+`transcribe.py` のPython版Whisper（`base`）とは別の処理です。
+本体とモデルが一致しても、マイク・入力設定・周囲の雑音・ビルド環境によって
+文字起こしの結果は変わることがあります。
+
 ### 2. Workerの依存関係
 
 ```bash
@@ -43,8 +99,11 @@ npm --prefix worker/lab-note-worker install
 ```
 
 ```bash
-npm --prefix workers-ai-test install
+npx --yes pnpm@11.20.0 --dir workers-ai-test install --frozen-lockfile
 ```
+
+AI・esa用Workerは `pnpm-lock.yaml` の版を再現するため、上記のpnpmで導入します。
+起動は以下の `npm run dev` で構いません。
 
 各Workerの`.dev.vars.example`を参考に、ローカル専用の`.dev.vars`を用意します。
 実際のアクセスキーやトークンをGitHubへコミットしないでください。
@@ -74,6 +133,47 @@ npm run dev
 ```
 
 Web画面はLive Serverの `http://127.0.0.1:53101` で開きます。
+
+## AIサーバーが停止した場合
+
+AI・esa用WorkerのWranglerは `4.147.0` に固定しています。
+既存の `pnpm-lock.yaml` に合わせて依存関係を更新する場合は、
+`workers-ai-test` 内で `npx --yes pnpm@11.20.0 install --frozen-lockfile` を実行してください。
+更新前から起動しているWorkerは `Ctrl+C` で終了し、`npm run dev` で起動し直します。
+
+接続が切れると、報告状況に「AIサーバーに接続できません」と表示します。
+サーバー再起動後は10秒間隔で元の処理IDを確認し、取得できた状態に表示を戻します。
+「状況を再確認」ボタンも、AIへの再送ではなく処理状況の取得だけを行います。
+
+サーバーに接続できても処理情報が見つからない場合や、処理状況が10分以上
+更新されていない場合は「AI処理状況を要確認」と表示します。
+これは失敗確定ではありません。Workerのログとesaの投稿状況を確認してください。
+処理の重複を避けるため、状況不明の処理を自動で再送・再開することはありません。
+サーバーから「失敗」が確認できた場合は「AI処理を再実行」を利用できます。
+
+## 連絡事項の録音・要約
+
+各報告会のメンバー一覧の最後にある「連絡事項」を選び、録音します。
+録音停止後に文字起こしを修正し、「保存してAI要約」で送信できます。
+使わない回は選択・録音する必要はありません。
+
+RustFSでは、他の報告者と同じ日付フォルダに
+`announcements_audio_01.webm`、`announcements_transcript_01.txt` のように保存します。
+音声の拡張子はブラウザにより異なり、ファイル番号は既存ファイルに応じて増えます。
+
+連絡事項には専用プロンプト（`workers-ai-test/src/announcements.ts`）を使います。
+学生の進捗報告と自動で分類する仕組みではないため、録音前に対象を選んでください。
+要約はesaの既存の「連絡事項」欄に反映し、学生の欄には入れません。
+AI生成部分は `<!-- lab-note:announcements:start -->` と
+`<!-- lab-note:announcements:end -->` で囲み、再送時はその範囲だけ置き換えます。
+esa上で手書きの内容を残したい場合は、この目印の外に記入してください。
+目印や連絡事項の見出しが壊れている場合は更新を中止します。
+
+Node.js 24で、外部通信・AI利用・esa投稿を行わずにテストできます。
+
+```bash
+npm --prefix workers-ai-test test
+```
 
 ## Kotoba-Whisperの確認
 

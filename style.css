@@ -102,7 +102,7 @@ textarea::placeholder { color: #96a3a9; }
 .report-item:last-child { border-bottom: none; }
 .report-item strong { color: var(--text); font-size: 13px; }
 .report-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.report-item-controls { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.report-item-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .report-status { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
 .report-status:is(a) { text-decoration: none; }
 .report-status:is(a):hover { box-shadow: 0 0 0 2px rgba(37,114,59,.18); transform: translateY(-1px); }
@@ -111,6 +111,8 @@ textarea::placeholder { color: #96a3a9; }
 .report-status.processing { color: #086875; background: #dff4f5; }
 .report-status.completed { color: #25723b; background: #e2f5e7; }
 .report-status.failed { color: #a32d3c; background: #fde8eb; }
+.report-status.unavailable { color: #775c11; background: #fff4ca; }
+.report-status-notice { margin: 8px 0 0; color: #775c11; font-size: 12px; line-height: 1.6; }
 .status-spinner { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: status-spin .75s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .details-button { padding: 3px 9px; white-space: nowrap; font-size: 11px; }

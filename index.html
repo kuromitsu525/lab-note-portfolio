@@ -54,12 +54,12 @@
                             <div class="record-actions">
                                 <button type="button" id="startButton"><span class="record-icon" aria-hidden="true"></span>録音開始</button>
                                 <button type="button" id="stopButton" disabled><span class="stop-icon" aria-hidden="true"></span>録音停止</button>
-                                <button type="button" id="uploadButton" disabled>音声・テキストをアップロード</button>
+                                <button type="button" id="uploadButton" disabled>保存してAI要約</button>
                             </div>
                         </div>
                         <div id="audioArea"></div>
-                        <div class="transcript-heading"><h3>文字起こし結果</h3><span>録音中に自動更新されます</span></div>
-                        <textarea id="transcript" placeholder="ここに文字起こし結果が表示されます" readonly></textarea>
+                        <div class="transcript-heading"><h3 id="transcriptLabel">文字起こし結果</h3><span id="transcriptHint">録音停止後に編集できます</span></div>
+                        <textarea id="transcript" aria-labelledby="transcriptLabel" aria-describedby="transcriptHint" placeholder="ここに文字起こし結果が表示されます" readonly></textarea>
                     </section>
                 </div>
 
