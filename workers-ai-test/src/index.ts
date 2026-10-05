@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { ANNOUNCEMENTS_PROMPT, findAnnouncementsSection, updateAnnouncementsSection } from "./announcements.ts";
 
 type QueueMessage = {
   jobId: string;
@@ -48,6 +49,9 @@ const SPEAKERS = {
   seminar3: ["machida", "rinya", "onogi", "yuga", "kuro", "yoshitomo", "nao", "yu-dai", "sana", "sawaki", "honoka", "kazuma"],
   overall: ["rui", "toyama", "togawa", "fuma", "ueji", "hayato", "kousei", "nishi", "hayashi", "futami", "ryouta", "mizutani", "fuseya", "hibino", "kosuke", "hanao", "kakumu", "makino", "tada", "seiken"]
 };
+
+const ANNOUNCEMENTS_SPEAKER = "announcements";
+Object.values(SPEAKERS).forEach(speakers => speakers.push(ANNOUNCEMENTS_SPEAKER));
 
 // 5つの会議テンプレート
 const TEMPLATES: Record<string, any> = {
@@ -613,7 +617,7 @@ app.get("/hello-ai", (c) => {
       
       template.addEventListener("change", (e) => {
         const key = e.target.value;
-        speakerSelect.innerHTML = (SPEAKERS[key] || []).map(s => \`<option value="\${s}">\${s}</option>\`).join("\\n");
+        speakerSelect.innerHTML = (SPEAKERS[key] || []).map(s => \`<option value="\${s}">\${s === "announcements" ? "連絡事項" : s}</option>\`).join("\\n");
         speakerSelect.disabled = false;
       });
 
@@ -709,6 +713,8 @@ export default {
   async queue(batch: any, env: Bindings) {
     for (const msg of batch.messages) {
       const { jobId, templateKey, speaker, meetingDate, transcriptUrl } = msg.body as QueueMessage;
+      const isAnnouncements = speaker === ANNOUNCEMENTS_SPEAKER;
+      const speakerLabel = isAnnouncements ? "連絡事項" : speaker;
       const selectedTemplate = TEMPLATES[templateKey];
       if (!selectedTemplate) {
         await saveJobStatus(env, jobId, "failed", { error: "報告会が見つかりません。" });
@@ -717,7 +723,7 @@ export default {
       }
 
       console.log(`\n========================================`);
-      console.log(`🚀 [1/5] キューの処理を開始します: 対象話者 = ${speaker}`);
+      console.log(`🚀 [1/5] キューの処理を開始します: 対象 = ${speakerLabel}`);
 
       try {
         await saveJobStatus(env, jobId, "processing", { speaker, templateKey });
@@ -771,12 +777,13 @@ export default {
         const speakerRegex = new RegExp(`(## \\*\\*${speaker}\\*\\*[\\s\\S]*?<br>)`, "i");
         const match = originalMarkdown.match(speakerRegex);
         
-        if (!match) {
+        if (!isAnnouncements && !match) {
           throw new Error(`${speaker}さんのMarkdownブロックが見つかりません。`);
         }
-        const oldSpeakerBlock = match[1];
+        if (isAnnouncements) findAnnouncementsSection(originalMarkdown);
+        const oldSpeakerBlock = match?.[1] || "";
 
-        const systemPrompt = `あなたは優秀な議事録作成アシスタントです。
+        const systemPrompt = isAnnouncements ? ANNOUNCEMENTS_PROMPT : `あなたは優秀な議事録作成アシスタントです。
 入力された【文字起こし】をもとに、以下の【対象話者のMarkdownブロック】の該当項目（[進捗]、[議論の内容]など）の下に、箇条書きで要約を追記して出力してください。
 
 【厳守するルール】
@@ -794,7 +801,7 @@ ${oldSpeakerBlock}`;
             { role: "system", content: systemPrompt },
             { role: "user", content: `【文字起こし】\n${message}` }
           ],
-          max_tokens: 1024
+          max_tokens: isAnnouncements ? 2048 : 1024
         });
 
         console.log(`✅ [4/5] AIの生成完了！`);
@@ -802,7 +809,7 @@ ${oldSpeakerBlock}`;
         const rawOutput = typeof aiResponse === "string" ? aiResponse : typeof aiResponse?.response === "string" ? aiResponse.response : aiResponse?.response?.text || "";
         let newSpeakerBlock = String(rawOutput).replace(/```markdown/gi, "").replace(/```/g, "").trim();
 
-        if (!newSpeakerBlock.endsWith("<br>")) {
+        if (!isAnnouncements && !newSpeakerBlock.endsWith("<br>")) {
           newSpeakerBlock += "\n<br>";
         }
 
@@ -822,13 +829,17 @@ ${oldSpeakerBlock}`;
         const latestMarkdown = latestDocData.body_md;
 
         // 最新の記事に対して、自分のブロックだけを入れ替える
-        const newMarkdown = latestMarkdown.replace(oldSpeakerBlock, newSpeakerBlock);
+        const newMarkdown = isAnnouncements
+          ? updateAnnouncementsSection(latestMarkdown, newSpeakerBlock)
+          : latestMarkdown.replace(oldSpeakerBlock, newSpeakerBlock);
 
         console.log(`🚀 [5/5] esaへ最新状態で上書き保存中...`);
         const patchRes = await fetch(`https://api.esa.io/v1/teams/kjlb/posts/${targetPostNumber}`, {
           method: "PATCH",
           headers: { "Authorization": `Bearer ${env.ESA_ACCESS_TOKEN}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ post: { body_md: newMarkdown, wip: true, message: `${speaker} の進捗をAIで更新` } })
+          body: JSON.stringify({ post: { body_md: newMarkdown, wip: true,
+            message: isAnnouncements ? "連絡事項をAIで更新" : `${speaker} の進捗をAIで更新`
+          } })
         });
         
         if (patchRes.ok) {

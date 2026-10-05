@@ -10,6 +10,7 @@ const timer = document.getElementById("timer");
 const audioArea = document.getElementById("audioArea");
 const transcriptionResult = document.getElementById("transcriptionResult");
 const transcript = document.getElementById("transcript");
+const transcriptHint = document.getElementById("transcriptHint");
 const meetingGroup = document.getElementById("meetingGroup");
 const memberButtons = document.getElementById("memberButtons");
 const selectedSpeaker = document.getElementById("selectedSpeaker");
@@ -30,6 +31,13 @@ const meetingGroups = {
     "HAR班": ["gomamono", "tada", "nakamura", "enami", "tatsunari"],
     "LBS班": ["hayashi", "natsuki", "ryuki", "hiroto", "hanada", "kakeru"]
 };
+
+const announcementsSpeaker = "announcements";
+Object.values(meetingGroups).forEach(speakers => speakers.push(announcementsSpeaker));
+
+function getSpeakerLabel(speaker) {
+    return speaker === announcementsSpeaker ? "連絡事項" : speaker;
+}
 
 const rustFsGroupNames = {
     "3年セミナー": "seminar3",
@@ -199,6 +207,7 @@ let finalTranscript = "";
 // ============================================================
 
 let isRecording = false;
+let isUploadingReport = false;
 
 let timerInterval = null;
 let elapsedSeconds = 0;
@@ -233,11 +242,69 @@ function getSpeakerSegments(group, speaker) {
 }
 
 function getSavedTranscript(group, speaker) {
-    return getSpeakerSegments(group, speaker)
-        .map(segment => segment.text)
+    const segments = getSpeakerSegments(group, speaker);
+    // 編集した全文と、その後に追加で録音した区間を表示する。
+    // 録音区間ごとの元の文字起こし・音声はそのまま保持する。
+    const edit = segments[0]?.transcriptEdit;
+    const remainingSegments = edit
+        ? segments.filter(segment => !edit.segmentIds.includes(segment.id))
+        : segments;
+    return [edit?.text, ...remainingSegments.map(segment => segment.text)]
         .filter(Boolean)
         .join("\n\n");
 }
+
+function hasUnfinishedAiJob(segments) {
+    return segments.some(segment => segment.aiJobId &&
+        !["completed", "failed"].includes(segment.aiQueueStatus));
+}
+
+function updateTranscriptEditState() {
+    const segments = getSpeakerSegments(meetingGroup.value, activeSpeaker);
+    const aiBusy = hasUnfinishedAiJob(segments) || segments.some(segment =>
+        ["queued", "processing", "retrying"].includes(segment.aiQueueStatus)
+    );
+    const statusUnknown = segments.some(segment => segment.aiStatusCheckState);
+    transcript.readOnly = !activeSpeaker || segments.length === 0 ||
+        startButton.disabled || isRecording || isCompletingTranscription ||
+        isUploadingReport || aiBusy;
+    transcriptHint.textContent = statusUnknown && aiBusy
+        ? "AI処理の状況を確認できないため、編集を一時停止しています"
+        : isUploadingReport || aiBusy
+        ? "保存・AI処理中は編集できません"
+        : transcript.readOnly
+            ? "録音停止後に編集できます"
+            : "編集内容は自動保存されます。修正後は「保存してAI要約」";
+}
+
+transcript.addEventListener("input", () => {
+    if (transcript.readOnly) return;
+
+    const segments = getSpeakerSegments(meetingGroup.value, activeSpeaker);
+    if (segments.length === 0 ||
+        transcript.value === getSavedTranscript(meetingGroup.value, activeSpeaker)) return;
+
+    segments[0].transcriptEdit = {
+        text: transcript.value,
+        segmentIds: segments.map(segment => segment.id)
+    };
+    // 修正版を次回送信する。アップロード済みの音声は再送しない。
+    segments.forEach(segment => {
+        delete segment.transcriptUploadedAt;
+        delete segment.transcriptStorageKey;
+        delete segment.aiQueuedAt;
+        delete segment.aiQueueStatus;
+        delete segment.aiJobId;
+        delete segment.aiStatusError;
+        delete segment.aiStatusCheckState;
+        delete segment.aiStatusCheckMessage;
+        delete segment.aiEsaUrl;
+        delete segment.aiEsaPostNumber;
+    });
+    saveDraftToBrowser();
+    renderReportList();
+    updateUploadButtonState();
+});
 
 function updateUploadButtonState() {
     const segments = activeSpeaker
@@ -254,11 +321,14 @@ function updateUploadButtonState() {
     );
     const hasFailedAi = segments.some(segment => segment.aiQueueStatus === "failed");
 
-    uploadButton.disabled = isRecording || !activeSpeaker ||
+    uploadButton.disabled = isRecording || isCompletingTranscription ||
+        isUploadingReport || startButton.disabled || !activeSpeaker ||
+        hasUnfinishedAiJob(segments) ||
         (!hasPendingAudio && !hasPendingTranscript && !hasPendingAi);
     uploadButton.textContent = hasFailedAi && !hasPendingAudio && !hasPendingTranscript
         ? "AI処理を再実行"
-        : "音声・テキストをアップロード";
+        : "保存してAI要約";
+    updateTranscriptEditState();
 }
 
 function getSpeakerStatus(segments) {
@@ -266,11 +336,29 @@ function getSpeakerStatus(segments) {
         return { label: "未録音", processing: false, className: "not-recorded" };
     }
 
-    if (segments.some(segment => !segment.aiQueuedAt)) {
+    const checkProblem = [...segments].reverse().find(segment =>
+        segment.aiJobId && segment.aiStatusCheckState
+    );
+    if (checkProblem) {
+        return {
+            label: checkProblem.aiStatusCheckState === "unreachable"
+                ? "AIサーバーに接続できません"
+                : "AI処理状況を要確認",
+            processing: false,
+            className: "unavailable",
+            message: checkProblem.aiStatusCheckMessage,
+            canRecheck: true
+        };
+    }
+
+    if (!hasUnfinishedAiJob(segments) && segments.some(segment => !segment.aiQueuedAt)) {
         return { label: "録音済み", processing: false, className: "recorded" };
     }
 
-    const latestStatus = [...segments]
+    const unfinishedStatus = [...segments].reverse().find(segment =>
+        segment.aiJobId && !["completed", "failed"].includes(segment.aiQueueStatus)
+    )?.aiQueueStatus;
+    const latestStatus = unfinishedStatus || [...segments]
         .reverse()
         .find(segment => segment.aiQueueStatus)?.aiQueueStatus;
 
@@ -328,6 +416,24 @@ async function enqueueMinutesGeneration(payload) {
 }
 
 let isPollingAiStatuses = false;
+const aiStatusRequestTimeoutMilliseconds = 10000;
+const aiStatusStaleMilliseconds = 10 * 60 * 1000;
+
+function updateAiJobFields(jobId, fields) {
+    let changed = false;
+    reportRecords.forEach(segments => {
+        segments.forEach(segment => {
+            if (segment.aiJobId !== jobId) return;
+            for (const [key, value] of Object.entries(fields)) {
+                if (segment[key] !== value) {
+                    segment[key] = value;
+                    changed = true;
+                }
+            }
+        });
+    });
+    return changed;
+}
 
 async function refreshAiJobStatuses() {
     if (isPollingAiStatuses) {
@@ -354,38 +460,60 @@ async function refreshAiJobStatuses() {
 
     try {
         for (const jobId of jobIds) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), aiStatusRequestTimeoutMilliseconds);
             try {
                 const response = await fetch(
                     `${aiWorkerBaseURL}/api/status/${encodeURIComponent(jobId)}`,
-                    { cache: "no-store" }
+                    { cache: "no-store", signal: controller.signal }
                 );
 
                 if (!response.ok) {
+                    changed = updateAiJobFields(jobId, {
+                        aiStatusCheckState: response.status === 404 ? "not-found" : "server-error",
+                        aiStatusCheckMessage: response.status === 404
+                            ? "サーバーには接続できましたが、元の処理情報が見つかりません。起動したWorkerとesaの投稿状況を確認してください。自動再送はしません。"
+                            : `処理状況の取得に失敗しました（HTTP ${response.status}）。時間をおいて再確認します。`
+                    }) || changed;
                     continue;
                 }
 
                 const result = await response.json();
+                if (!result || !["queued", "processing", "retrying", "completed", "failed"].includes(result.status)) {
+                    changed = updateAiJobFields(jobId, {
+                        aiStatusCheckState: "invalid-response",
+                        aiStatusCheckMessage: "サーバーから正しい処理状況を取得できませんでした。接続先のWorkerを確認してください。"
+                    }) || changed;
+                    continue;
+                }
                 const resolvedEsaUrl = result.esaUrl || (
                     result.esaPostNumber
                         ? `https://kjlb.esa.io/posts/${result.esaPostNumber}`
                         : ""
                 );
-                reportRecords.forEach(segments => {
-                    segments.forEach(segment => {
-                        if (segment.aiJobId === jobId && (
-                            segment.aiQueueStatus !== result.status ||
-                            segment.aiEsaUrl !== resolvedEsaUrl
-                        )) {
-                            segment.aiQueueStatus = result.status;
-                            segment.aiStatusError = result.error || "";
-                            segment.aiEsaUrl = resolvedEsaUrl;
-                            segment.aiEsaPostNumber = result.esaPostNumber || null;
-                            changed = true;
-                        }
-                    });
-                });
+                // 通信が復旧しても、停止前の「処理中」がKVに残っている場合がある。
+                // 経過時間だけで失敗と決めたり、AIへ再送したりはしない。
+                const updatedAt = Date.parse(result.updatedAt);
+                const stale = ["queued", "processing", "retrying"].includes(result.status) &&
+                    Number.isFinite(updatedAt) && Date.now() - updatedAt > aiStatusStaleMilliseconds;
+                changed = updateAiJobFields(jobId, {
+                    aiQueueStatus: result.status,
+                    aiStatusError: result.error || "",
+                    aiEsaUrl: resolvedEsaUrl,
+                    aiEsaPostNumber: result.esaPostNumber || null,
+                    aiStatusCheckState: stale ? "stale" : "",
+                    aiStatusCheckMessage: stale
+                        ? "サーバーには接続できていますが、処理状況が10分以上更新されていません。処理中か中断したかを判断できないため、Workerのログとesaを確認してください。自動再送はしません。"
+                        : ""
+                }) || changed;
             } catch (error) {
                 console.warn("AI処理状況を取得できませんでした:", error);
+                changed = updateAiJobFields(jobId, {
+                    aiStatusCheckState: "unreachable",
+                    aiStatusCheckMessage: "AIサーバーとの接続が切れたか、応答を取得できませんでした。AI・esa用Workerを起動してください。復旧後は元の処理IDで自動確認します。AI処理は再送しません。"
+                }) || changed;
+            } finally {
+                clearTimeout(timeoutId);
             }
         }
 
@@ -490,7 +618,7 @@ function renderReportList() {
         item.className = "report-item";
         heading.className = "report-item-heading";
         controls.className = "report-item-controls";
-        name.textContent = speaker;
+        name.textContent = getSpeakerLabel(speaker);
         const speakerStatus = getSpeakerStatus(segments);
         const esaUrl = [...segments]
             .reverse()
@@ -535,12 +663,36 @@ function renderReportList() {
         heading.appendChild(name);
         controls.appendChild(status);
 
+        if (speakerStatus.canRecheck) {
+            const recheckButton = document.createElement("button");
+            recheckButton.type = "button";
+            recheckButton.className = "details-button";
+            recheckButton.textContent = "状況を再確認";
+            recheckButton.addEventListener("click", async () => {
+                recheckButton.disabled = true;
+                recheckButton.textContent = "確認中…";
+                try {
+                    await refreshAiJobStatuses();
+                } finally {
+                    renderReportList();
+                }
+            });
+            controls.appendChild(recheckButton);
+        }
+
         if (segments.length > 0) {
             controls.appendChild(detailsButton);
         }
 
         heading.appendChild(controls);
         item.appendChild(heading);
+
+        if (speakerStatus.message) {
+            const notice = document.createElement("p");
+            notice.className = "report-status-notice";
+            notice.textContent = speakerStatus.message;
+            item.appendChild(notice);
+        }
 
         if (segments.length > 0) {
             item.appendChild(text);
@@ -556,7 +708,9 @@ function selectSpeaker(speaker) {
     }
 
     activeSpeaker = speaker;
-    selectedSpeaker.textContent = `選択中の報告者：${speaker}`;
+    selectedSpeaker.textContent = speaker === announcementsSpeaker
+        ? "選択中：連絡事項"
+        : `選択中の報告者：${speaker}`;
     transcript.value = getSavedTranscript(meetingGroup.value, speaker);
     startButton.disabled = false;
     updateUploadButtonState();
@@ -580,7 +734,7 @@ function renderMemberButtons() {
         meetingGroups[group].forEach(speaker => {
             const button = document.createElement("button");
             button.type = "button";
-            button.textContent = speaker;
+            button.textContent = getSpeakerLabel(speaker);
             button.dataset.speaker = speaker;
             button.addEventListener("click", () => selectSpeaker(speaker));
             memberButtons.appendChild(button);
@@ -604,7 +758,7 @@ recordingDate.addEventListener("change", () => {
     saveDraftToBrowser();
 });
 restoreDraftFromBrowser().then(refreshAiJobStatuses);
-setInterval(refreshAiJobStatuses, 5000);
+setInterval(refreshAiJobStatuses, 10000);
 
 clearDraftButton.addEventListener("click", async () => {
     const shouldClear = confirm(
@@ -1167,6 +1321,7 @@ startButton.addEventListener(
             const reportSpeaker = activeSpeaker;
 
             startButton.disabled = true;
+            updateTranscriptEditState();
             clearDraftButton.disabled = true;
             uploadButton.disabled = true;
             recordingDate.disabled = true;
@@ -1191,7 +1346,7 @@ startButton.addEventListener(
             localInferenceQueue = Promise.resolve();
             localTranscriptionError = null;
 
-            transcript.value = "";
+            updateTranscriptDisplay();
 
             // ------------------------------------------------
             // マイク取得
@@ -1561,6 +1716,7 @@ startButton.addEventListener(
             memberButtons.querySelectorAll("button").forEach(button => {
                 button.disabled = false;
             });
+            updateTranscriptDisplay();
             updateUploadButtonState();
 
         }
@@ -1695,6 +1851,11 @@ uploadButton.addEventListener("click", async () => {
         return;
     }
 
+    if (hasUnfinishedAiJob(segments)) {
+        alert("前回のAI処理が完了したか確認できるまで、再送信できません。報告状況を確認してください。");
+        return;
+    }
+
     const pendingAudioSegments = segments.filter(
         segment => segment.audioBlob && segment.audioUploadStatus !== "uploaded"
     );
@@ -1702,18 +1863,23 @@ uploadButton.addEventListener("click", async () => {
     const needsAiQueue = segments.some(
         segment => !segment.aiQueuedAt || segment.aiQueueStatus === "failed"
     );
-    const text = segments
-        .map(segment => segment.text.trim())
-        .filter(Boolean)
-        .join("\n\n");
+    const text = getSavedTranscript(group, speaker).trim();
+
+    if (!text) {
+        alert("文字起こし結果を入力してから保存してください。");
+        return;
+    }
 
     if (pendingAudioSegments.length === 0 && !hasNewTranscript && !needsAiQueue) {
         alert("この報告者のデータはアップロード済みで、AI処理も登録済みです。");
         return;
     }
 
+    isUploadingReport = true;
     uploadButton.disabled = true;
     startButton.disabled = true;
+    clearDraftButton.disabled = true;
+    updateTranscriptEditState();
     meetingGroup.disabled = true;
     memberButtons.querySelectorAll("button").forEach(button => {
         button.disabled = true;
@@ -1797,6 +1963,8 @@ uploadButton.addEventListener("click", async () => {
                 segment.aiQueueStatus = "queued";
                 segment.aiJobId = queueResult.jobId;
                 segment.aiStatusError = "";
+                segment.aiStatusCheckState = "";
+                segment.aiStatusCheckMessage = "";
             });
         } catch (error) {
             segments.forEach(segment => {
@@ -1811,7 +1979,9 @@ uploadButton.addEventListener("click", async () => {
     await saveDraftToBrowser();
     renderReportList();
 
+    isUploadingReport = false;
     startButton.disabled = false;
+    clearDraftButton.disabled = false;
     meetingGroup.disabled = false;
     memberButtons.querySelectorAll("button").forEach(button => {
         button.disabled = false;
@@ -1825,7 +1995,7 @@ uploadButton.addEventListener("click", async () => {
         );
     } else {
         alert(
-            `${speaker}の音声と文字起こしをRustFSへアップロードし、` +
+            `${getSpeakerLabel(speaker)}の音声と文字起こしをRustFSへアップロードし、` +
             "AIによる要約とesaへの反映を受け付けました。"
         );
     }
