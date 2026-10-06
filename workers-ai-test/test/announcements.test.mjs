@@ -5,6 +5,7 @@ import test from "node:test";
 import worker from "../src/index.ts";
 import { ANNOUNCEMENTS_PROMPT, updateAnnouncementsSection } from "../src/announcements.ts";
 import storageWorker from "../../worker/lab-note-worker/src/index.js";
+const realSetTimeout = globalThis.setTimeout;
 
 const original = "# **出席者**\n- kuro\n\n# **連絡事項**\n手書きの連絡\n\n# **出席率**\n100%\n\n# **進捗**\n## **kuro**\n### [進捗]\n以前の内容\n<br>\n";
 const summary = "- **論文添削への協力**\n  - 先輩の論文を読み、研究の目的を知るためにコメントする。";
@@ -57,11 +58,12 @@ test("見出し欠落・壊れた目印・不正なAI出力では記事を更新
 
 function createEnv() {
   const statuses = new Map();
+  const history = [];
   const messages = [];
   return {
-    statuses, messages, ESA_ACCESS_TOKEN: "test-token",
+    statuses, history, messages, ESA_ACCESS_TOKEN: "test-token",
     AI_JOB_STATUS: {
-      async put(key, value) { statuses.set(key, JSON.parse(value)); },
+      async put(key, value) { const status = JSON.parse(value); statuses.set(key, status); history.push(status); },
       async get(key) { return statuses.get(key); },
       async delete(key) { statuses.delete(key); },
     },
@@ -87,6 +89,7 @@ test("各テンプレートで連絡事項をキューに登録でき、未知�
 
 for (const speaker of ["announcements", "kuro"]) {
   test(`Queueから要約・esa更新まで: ${speaker}`, async t => {
+    t.mock.method(globalThis, "setTimeout", callback => realSetTimeout(callback, 0));
     t.mock.method(console, "log", () => {});
     const env = createEnv();
     let aiInput;
@@ -112,6 +115,8 @@ for (const speaker of ["announcements", "kuro"]) {
       meetingDate: "2026-10-05", transcriptUrl: "https://s3.kajilab.dev/lab-note/test.txt"},
       attempts: 3, ack() {}, retry() { assert.fail("Unexpected retry"); }}]}, env);
     assert.equal(env.statuses.get("test-job").status, "completed");
+    assert.deepEqual(env.history.filter(entry => entry.status === "processing").map(entry => entry.stage),
+      ["transcript", "esa_prepare", "ai", "esa_post"]);
     assert.equal(env.statuses.get("test-job").esaUrl, "https://kjlb.esa.io/posts/123");
     assert.ok(patch.body_md.includes("AI処理中に追記された内容"));
     assert.ok(patch.body_md.includes(generated));
@@ -128,6 +133,7 @@ for (const speaker of ["announcements", "kuro"]) {
 }
 
 test("全テンプレートで新規esa記事の連絡事項欄に反映できる", async t => {
+  t.mock.method(globalThis, "setTimeout", callback => realSetTimeout(callback, 0));
   t.mock.method(console, "log", () => {});
   let created;
   let patched;
@@ -182,5 +188,37 @@ test("連絡事項の音声・テキストに署名URLを発行できる（外�
         assert.equal(readResponse.status, 200);
       }
     }
+  }
+});
+
+test("失敗した工程と理由をKVへ保存して画面に渡す", async t => {
+  t.mock.method(console, "log", () => {});
+  t.mock.method(console, "error", () => {});
+  t.mock.method(globalThis, "setTimeout", callback => realSetTimeout(callback, 0));
+  let failingStage;
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    if (url === "https://s3.kajilab.dev/lab-note/test.txt") {
+      return failingStage === "transcript" ? new Response(null, {status: 403}) : new Response("連絡事項");
+    }
+    if (url.includes("posts?q=")) {
+      return failingStage === "esa_prepare" ? new Response(null, {status: 401}) : Response.json({posts: [{number: 123, body_md: original}]});
+    }
+    if (options.method === "PATCH") return new Response(null, {status: 500});
+    return Response.json({body_md: original});
+  });
+  for (const [stage, prefix] of [["transcript", "文字起こしの取得"], ["esa_prepare", "esa記事の準備"], ["ai", "AI要約の生成"], ["esa_post", "esaへの投稿"]]) {
+    failingStage = stage;
+    const env = createEnv();
+    env.AI = {async run() {
+      if (stage === "ai") throw new Error("AI利用上限");
+      return {response: summary};
+    }};
+    await worker.queue({messages: [{body: {jobId: "failed-job", templateKey: "hci", speaker: "announcements",
+      meetingDate: "2026-10-06", transcriptUrl: "https://s3.kajilab.dev/lab-note/test.txt"},
+      attempts: 3, ack() {}, retry() { assert.fail(); }}]}, env);
+    const result = env.statuses.get("failed-job");
+    assert.equal(result.status, "failed");
+    assert.equal(result.stage, stage);
+    assert.ok(result.error.startsWith(`${prefix}:`));
   }
 });

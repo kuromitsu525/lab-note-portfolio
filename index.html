@@ -7,16 +7,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header class="app-header">
-        <div class="header-inner">
-            <div class="brand" aria-label="Lab Note">
-                <span class="brand-mark" aria-hidden="true">L</span>
-                <span>Lab Note</span>
-            </div>
-        </div>
-    </header>
-
-    <main>
+    <main aria-label="Lab Note">
         <div id="generateTab">
             <div class="workspace-grid">
                 <div class="workspace-main">
@@ -64,16 +55,13 @@
                 </div>
 
                 <aside class="workspace-side">
+                    <button type="button" id="clearDraftButton" class="danger-button">記録をリセット</button>
                     <section class="panel report-list-area">
                         <div class="section-heading compact">
                             <span class="step-number">3</span>
                             <div><h2>報告状況</h2></div>
                         </div>
                         <div id="reportList" class="report-list-empty">報告会を選択してください</div>
-                    </section>
-                    <section class="reset-area">
-                        <button type="button" id="clearDraftButton" class="danger-button">新しい報告会を開始</button>
-                        <p>現在の録音・文字起こしデータを消去します</p>
                     </section>
                 </aside>
             </div>

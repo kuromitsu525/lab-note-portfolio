@@ -115,7 +115,7 @@ test("停止前の処理中が残った場合は要確認となり、追加録�
   assert.equal(app.segment.aiStatusCheckState, "stale");
   assert.equal(app.context.uploadButton.disabled, true);
   await app.listeners.click();
-  assert.ok(app.context.lastAlert.includes("再送信できません"));
+  assert.ok(app.segment.reportNotice.includes("再送信できません"));
   assert.equal(app.requests.length, 1, "クリックでもAIへ再送しない");
 });
 
@@ -156,4 +156,75 @@ test("再確認ボタンと接続断の説明を表示し、ボタンは状態�
   assert.equal(app.status().label, "AI処理失敗");
   assert.equal(app.requests.length, 2);
   assert.ok(app.requests.every(request => request.url.includes("/api/status/")));
+});
+
+for (const failure of [null, "audio", "transcript", "enqueue"]) {
+  test(`保存からAI受付までを報告状況だけで表示する: ${failure || "成功"}`, async () => {
+    const app = setup();
+    for (const field of ["aiJobId", "aiQueueStatus", "aiQueuedAt", "transcriptUploadedAt"]) delete app.segment[field];
+    Object.assign(app.segment, {audioUploadStatus: "pending", audioMimeType: "audio/webm",
+      startedAt: "2026-10-06T00:00:00Z", meetingDate: "2026-10-06"});
+    const operations = [];
+    const phases = [];
+    Object.assign(app.context, {
+      Blob, clearDraftButton: {}, memberButtons: {querySelectorAll: () => []},
+      rustFsGroupNames: {"HCI班": "hci"},
+      alert() { assert.fail("保存ボタンではポップアップを表示しない"); },
+      renderReportList() { phases.push(app.status().label); },
+      async uploadFileToRustFs({kind}) {
+        operations.push(kind);
+        if (failure === kind) throw new Error(`${kind} HTTP 403`);
+        return `hci/${kind}`;
+      },
+      async requestRustFsSignedUrl() { return {url: "https://example.invalid/transcript"}; },
+      async enqueueMinutesGeneration() {
+        operations.push("enqueue");
+        if (failure === "enqueue") throw new Error("AI受付 HTTP 500");
+        return {jobId: "new-job"};
+      },
+    });
+    await app.listeners.click();
+    assert.ok(phases.includes("音声を保存中"));
+    assert.ok(phases.includes("テキストを保存中"));
+    assert.equal(app.context.isUploadingReport, false);
+    assert.equal(app.context.startButton.disabled, false);
+    assert.ok(app.snapshot());
+    const problems = app.context.getReportProblems([app.segment]).join("\n");
+    if (failure) assert.ok(problems.includes(failure === "enqueue" ? "AI受付 HTTP 500" : `${failure} HTTP 403`));
+    else assert.equal(problems, "");
+    if (failure === "transcript") {
+      assert.ok(!operations.includes("enqueue"));
+      assert.equal(app.status().label, "アップロード失敗");
+    } else if (failure === "enqueue") {
+      assert.equal(app.status().label, "AI処理失敗");
+      assert.equal(app.context.uploadButton.disabled, false);
+    } else {
+      assert.equal(app.status().label, failure === "audio" ? "アップロード失敗" : "AI生成待ち");
+      if (!failure) assert.ok(phases.includes("AI処理を登録中"));
+    }
+  });
+}
+
+test("AIの処理段階と失敗理由を表示し、esa投稿中も区別する", async () => {
+  const app = setup();
+  for (const [stage, label] of [["transcript", "文字起こしを取得中"], ["esa_prepare", "esa記事を準備中"], ["ai", "AI生成中"], ["esa_post", "esaへ投稿中"]]) {
+    app.respond(() => Response.json({status: "processing", stage, updatedAt: new Date().toISOString()}));
+    await app.context.refreshAiJobStatuses();
+    assert.equal(app.status().label, label);
+  }
+  app.respond(() => Response.json({status: "failed", stage: "esa_post", error: "esaへの投稿: HTTP 403"}));
+  await app.context.refreshAiJobStatuses();
+  assert.equal(app.status().label, "esa投稿失敗");
+  assert.ok(app.context.getReportProblems([app.segment])[0].includes("esaへの投稿: HTTP 403"));
+});
+
+test("esa投稿後も音声の失敗を優先し、再保存成功後はesa投稿済みに戻す", () => {
+  const app = setup();
+  Object.assign(app.segment, {aiQueueStatus: "completed", aiEsaUrl: "https://kjlb.esa.io/posts/123",
+    audioUploadStatus: "failed", audioUploadError: "HTTP 403"});
+  assert.equal(app.status().label, "アップロード失敗");
+  assert.ok(app.context.getReportProblems([app.segment])[0].includes("HTTP 403"));
+  app.segment.audioUploadStatus = "uploaded";
+  assert.equal(app.status().label, "esa投稿済み");
+  assert.equal(app.context.getReportProblems([app.segment]).length, 0);
 });
