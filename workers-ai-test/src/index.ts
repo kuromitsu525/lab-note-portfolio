@@ -725,8 +725,21 @@ export default {
       console.log(`\n========================================`);
       console.log(`🚀 [1/5] キューの処理を開始します: 対象 = ${speakerLabel}`);
 
+      let stage = "transcript";
+      let lastStatusWriteAt = Date.now();
+      const stageLabels: Record<string, string> = {
+        transcript: "文字起こしの取得", esa_prepare: "esa記事の準備",
+        ai: "AI要約の生成", esa_post: "esaへの投稿"
+      };
+      const persistStatus = async (status: JobStatus, details: Record<string, unknown> = {}) => {
+        // KVの同一キーへの短時間の連続書き込みを避ける。
+        const delay = Math.max(0, 1100 - (Date.now() - lastStatusWriteAt));
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        await saveJobStatus(env, jobId, status, { speaker, templateKey, stage, ...details });
+        lastStatusWriteAt = Date.now();
+      };
       try {
-        await saveJobStatus(env, jobId, "processing", { speaker, templateKey });
+        await persistStatus("processing");
 
         const transcriptResponse = await fetch(transcriptUrl);
         if (!transcriptResponse.ok) {
@@ -742,6 +755,8 @@ export default {
         const postTitle = selectedTemplate.titleTemplate;
 
         console.log(`🔍 [2/5] esaから記事を検索・取得中...`);
+        stage = "esa_prepare";
+        await persistStatus("processing");
         const searchQuery = encodeURIComponent(`name:"${postTitle}" category:"${postCategory}"`);
         const searchRes = await fetch(`https://api.esa.io/v1/teams/kjlb/posts?q=${searchQuery}`, {
           headers: { "Authorization": `Bearer ${env.ESA_ACCESS_TOKEN}` }
@@ -795,6 +810,8 @@ export default {
 ${oldSpeakerBlock}`;
 
         console.log(`🤖 [3/5] AIに要約とMarkdown生成を依頼中... (数十秒〜数分かかります)`);
+        stage = "ai";
+        await persistStatus("processing");
         
         const aiResponse = await env.AI.run("@cf/qwen/qwen2.5-coder-32b-instruct", {
           messages: [
@@ -819,6 +836,8 @@ ${oldSpeakerBlock}`;
 
         // ★★★ ダブルフェッチ（安全対策）★★★
         console.log(`🔄 [4.5/5] 競合を防ぐため、保存直前に最新のesa記事を再取得します...`);
+        stage = "esa_post";
+        await persistStatus("processing");
         const latestDocRes = await fetch(`https://api.esa.io/v1/teams/kjlb/posts/${targetPostNumber}`, {
           headers: { "Authorization": `Bearer ${env.ESA_ACCESS_TOKEN}` }
         });
@@ -843,7 +862,7 @@ ${oldSpeakerBlock}`;
         });
         
         if (patchRes.ok) {
-          await saveJobStatus(env, jobId, "completed", {
+          await persistStatus("completed", {
             speaker,
             templateKey,
             esaPostNumber: targetPostNumber,
@@ -857,13 +876,13 @@ ${oldSpeakerBlock}`;
 
       } catch (e) {
         console.error("Queue処理中のエラー:", e);
-        const errorMessage = e instanceof Error ? e.message : String(e);
+        const errorMessage = `${stageLabels[stage]}: ${e instanceof Error ? e.message : String(e)}`;
 
         if (msg.attempts >= 3) {
-          await saveJobStatus(env, jobId, "failed", { error: errorMessage });
+          await persistStatus("failed", { error: errorMessage });
           msg.ack();
         } else {
-          await saveJobStatus(env, jobId, "retrying", {
+          await persistStatus("retrying", {
             error: errorMessage,
             attempts: msg.attempts
           });
