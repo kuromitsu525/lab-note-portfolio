@@ -2038,7 +2038,10 @@ uploadButton.addEventListener("click", async () => {
                     templateKey: rustFsGroupNames[group],
                     speaker,
                     meetingDate: firstSegment.meetingDate || getJapanDateString(firstSegment.startedAt),
-                    transcriptUrl: readTarget.url
+                    transcriptUrl: readTarget.url,
+                    presentationEsaUrl: typeof document !== "undefined"
+                        ? document.getElementById("presentationEsaUrl")?.value.trim() || ""
+                        : ""
                 });
 
                 const queuedAt = new Date().toISOString();
