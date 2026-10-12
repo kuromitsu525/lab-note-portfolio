@@ -8,6 +8,7 @@ type QueueMessage = {
   speaker: string;
   meetingDate: string;
   transcriptUrl: string;
+  presentationEsaUrl?: string;
 };
 
 type Bindings = {
@@ -39,6 +40,80 @@ async function saveJobStatus(
     updatedAt: new Date().toISOString(),
     ...details
   }), { expirationTtl: 60 * 60 * 24 * 7 });
+}
+
+type PresentationEsaInfo = {
+  title: string;
+  content: string;
+  url: string;
+  error?: string;
+};
+
+async function fetchPresentationEsa(
+  urlString: string,
+  accessToken: string
+): Promise<PresentationEsaInfo> {
+  const trimmedUrl = urlString.trim();
+  try {
+    const url = new URL(trimmedUrl);
+    const postMatch = url.pathname.match(/\/posts\/(\d+)/);
+    if (!postMatch) {
+      return { title: "", content: "", url: trimmedUrl, error: "URLに投稿IDが含まれていません" };
+    }
+
+    const team = url.hostname.endsWith(".esa.io") ? url.hostname.split(".")[0] : "kjlb";
+    const response = await fetch(`https://api.esa.io/v1/teams/${team}/posts/${postMatch[1]}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!response.ok) {
+      return { title: "", content: "", url: trimmedUrl, error: `記事取得エラー (HTTP ${response.status})` };
+    }
+
+    const data: any = await response.json();
+    return { title: data.name || "", content: data.body_md || "", url: data.url || trimmedUrl };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { title: "", content: "", url: trimmedUrl, error: `取得失敗 (${message})` };
+  }
+}
+
+async function resolvePresentationEsa(
+  speaker: string,
+  meetingDate: string,
+  manualUrl: string | undefined,
+  accessToken: string
+): Promise<PresentationEsaInfo> {
+  if (manualUrl?.trim()) {
+    return fetchPresentationEsa(manualUrl, accessToken);
+  }
+
+  const [, month, day] = meetingDate.split("-");
+  if (!month || !day) return { title: "", content: "", url: "" };
+
+  const dates = [`${month}/${day}`, `${Number(month)}/${Number(day)}`];
+  try {
+    for (const date of dates) {
+      const query = encodeURIComponent(`category:1.進捗報告(個人) category:${speaker} category:${date}`);
+      const response = await fetch(`https://api.esa.io/v1/teams/kjlb/posts?q=${query}&per_page=1`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (!response.ok) continue;
+
+      const data: any = await response.json();
+      const post = data.posts?.[0];
+      if (post) {
+        return {
+          title: post.name || "",
+          content: post.body_md || "",
+          url: post.url || `https://kjlb.esa.io/posts/${post.number}`
+        };
+      }
+    }
+    return { title: "", content: "", url: "", error: `${speaker}さんの進捗報告記事が見つかりませんでした` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { title: "", content: "", url: "", error: `検索エラー (${message})` };
+  }
 }
 
 // 話者リスト
@@ -668,17 +743,21 @@ app.post("/api/enqueue", async (c) => {
     transcriptUrl.hostname === "s3.kajilab.dev" &&
     transcriptUrl.pathname.startsWith("/lab-note/");
   const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(body.meetingDate);
+  const presentationEsaUrl = typeof body.presentationEsaUrl === "string" && body.presentationEsaUrl.trim()
+    ? body.presentationEsaUrl.trim()
+    : undefined;
 
   if (!speakers?.includes(body.speaker) || !isValidDate || !isAllowedUrl) {
     return c.json({ error: "Queueへ登録するデータが正しくありません。" }, 400);
   }
 
   const jobId = crypto.randomUUID();
-  const queueMessage: QueueMessage = { ...body, jobId };
+  const queueMessage: QueueMessage = { ...body, presentationEsaUrl, jobId };
 
   await saveJobStatus(c.env, jobId, "queued", {
     speaker: body.speaker,
-    templateKey: body.templateKey
+    templateKey: body.templateKey,
+    presentationEsaUrl
   });
 
   try {
@@ -712,7 +791,7 @@ export default {
   
   async queue(batch: any, env: Bindings) {
     for (const msg of batch.messages) {
-      const { jobId, templateKey, speaker, meetingDate, transcriptUrl } = msg.body as QueueMessage;
+      const { jobId, templateKey, speaker, meetingDate, transcriptUrl, presentationEsaUrl } = msg.body as QueueMessage;
       const isAnnouncements = speaker === ANNOUNCEMENTS_SPEAKER;
       const speakerLabel = isAnnouncements ? "連絡事項" : speaker;
       const selectedTemplate = TEMPLATES[templateKey];
@@ -749,6 +828,10 @@ export default {
         if (!message.trim()) {
           throw new Error("取得した文字起こしが空です。");
         }
+
+        const presentation = isAnnouncements
+          ? { title: "", content: "", url: "" }
+          : await resolvePresentationEsa(speaker, meetingDate, presentationEsaUrl, env.ESA_ACCESS_TOKEN);
 
         const [yyyy, mm, dd] = meetingDate.split("-");
         const postCategory = `${selectedTemplate.categoryPrefix}/${yyyy}/${mm}/${dd}`;
@@ -798,8 +881,15 @@ export default {
         if (isAnnouncements) findAnnouncementsSection(originalMarkdown);
         const oldSpeakerBlock = match?.[1] || "";
 
+        const presentationContext = presentation.content
+          ? `\n\n【個人発表用esa記事】\nタイトル: ${presentation.title}\n${presentation.content.slice(0, 4000)}`
+          : presentation.error
+            ? `\n\n【個人発表用esa記事】\n参照できませんでした: ${presentation.error}`
+            : "";
         const systemPrompt = isAnnouncements ? ANNOUNCEMENTS_PROMPT : `あなたは優秀な議事録作成アシスタントです。
 入力された【文字起こし】をもとに、以下の【対象話者のMarkdownブロック】の該当項目（[進捗]、[議論の内容]など）の下に、箇条書きで要約を追記して出力してください。
+
+      ${presentationContext}
 
 【厳守するルール】
 1. 見出し（## や ###）や改行、一番下の <br> などのMarkdown構造は絶対に崩さず、そのまま出力すること。
