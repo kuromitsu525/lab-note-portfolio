@@ -179,7 +179,7 @@ test("連絡事項の音声・テキストに署名URLを発行できる（外�
       }), env);
       assert.equal(response.status, 200);
       const {key} = await response.json();
-      assert.equal(key, `${group}/2026年/10月/5日/announcements_${kind}_01.${extension}`);
+      assert.equal(key, `${group}/2026/10/05/announcements_${kind}_01.${extension}`);
       if (kind === "transcript") {
         const readResponse = await storageWorker.fetch(new Request("http://localhost/api/rustfs/presign", {
           method: "POST", headers: {"Content-Type": "application/json"},

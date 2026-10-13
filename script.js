@@ -13,7 +13,6 @@ const transcript = document.getElementById("transcript");
 const transcriptHint = document.getElementById("transcriptHint");
 const meetingGroup = document.getElementById("meetingGroup");
 const memberButtons = document.getElementById("memberButtons");
-const selectedSpeaker = document.getElementById("selectedSpeaker");
 const reportList = document.getElementById("reportList");
 const clearDraftButton = document.getElementById("clearDraftButton");
 
@@ -429,7 +428,7 @@ function getJapanDateString(value = new Date()) {
 
 function getRustFsDateFolderPath(date) {
     const [year, month, day] = date.split("-");
-    return `${year}年/${Number(month)}月/${Number(day)}日`;
+    return `${year}/${month}/${day}`;
 }
 
 async function requestRustFsSignedUrl(payload) {
@@ -773,9 +772,6 @@ function selectSpeaker(speaker) {
     }
 
     activeSpeaker = speaker;
-    selectedSpeaker.textContent = speaker === announcementsSpeaker
-        ? "選択中：連絡事項"
-        : `選択中の報告者：${speaker}`;
     transcript.value = getSavedTranscript(meetingGroup.value, speaker);
     startButton.disabled = false;
     updateUploadButtonState();
@@ -790,7 +786,6 @@ function renderMemberButtons() {
 
     memberButtons.innerHTML = "";
     activeSpeaker = "";
-    selectedSpeaker.textContent = "報告者を選択してください";
     transcript.value = "";
     startButton.disabled = true;
     updateUploadButtonState();

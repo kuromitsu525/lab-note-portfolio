@@ -4,7 +4,11 @@ const allowedOrigin = "http://127.0.0.1:53101";
 const allowedGroups = new Set(["seminar3", "hci", "har", "lbs"]);
 const allowedKinds = new Set(["audio", "transcript"]);
 const allowedExtensions = new Set(["webm", "mp4", "ogg", "txt"]);
-const allowedTranscriptKeyPattern = /^(seminar3|hci|har|lbs)\/\d{4}年\/(?:[1-9]|1[0-2])月\/(?:[1-9]|[12]\d|3[01])日\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/;
+const allowedTranscriptKeyPatterns = [
+    /^(seminar3|hci|har|lbs)\/\d{4}\/(?:0[1-9]|1[0-2])\/(?:0[1-9]|[12]\d|3[01])\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/,
+    // 変更前に保存済みの文字起こしを、未完了のAI処理から再取得できるようにする。
+    /^(seminar3|hci|har|lbs)\/\d{4}年\/(?:[1-9]|1[0-2])月\/(?:[1-9]|[12]\d|3[01])日\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/
+];
 
 function corsHeaders() {
     return {
@@ -29,7 +33,7 @@ function isValidSpeaker(value) {
 
 function getDateFolderPath(date) {
     const [year, month, day] = date.split("-");
-    return `${year}年/${Number(month)}月/${Number(day)}日`;
+    return `${year}/${month}/${day}`;
 }
 
 function getRustFsConfig(env) {
@@ -81,7 +85,7 @@ async function createSignedUrl(request, env) {
 
     if (operation === "get") {
         if (typeof requestedKey !== "string" ||
-            !allowedTranscriptKeyPattern.test(requestedKey)) {
+            !allowedTranscriptKeyPatterns.some(pattern => pattern.test(requestedKey))) {
             return json({ error: "読み取り対象の指定が正しくありません。" }, 400);
         }
 
