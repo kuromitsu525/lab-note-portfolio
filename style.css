@@ -59,8 +59,6 @@ select:hover:not(:disabled) { border-color: var(--primary); }
 .member-buttons button { padding: 7px 14px; font-size: 14px; font-weight: 650; }
 .member-buttons button:hover:not(:disabled) { color: var(--primary-dark); border-color: #8bc6ca; }
 .member-buttons button.active { color: white; background: var(--primary); border-color: var(--primary); box-shadow: 0 5px 12px rgba(8,127,140,.2); }
-.selected-speaker { margin: 13px 0 0; padding: 9px 12px; color: var(--muted); background: var(--soft); border-left: 3px solid var(--line); border-radius: 4px 8px 8px 4px; font-size: 13px; }
-
 .recording-date-field { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .recording-date-field label { margin: 0; white-space: nowrap; }
 #recordingDate { min-height: 41px; padding: 7px 11px; color: var(--text); background: var(--surface); border: 1px solid #cbd8dd; border-radius: 9px; font: inherit; }

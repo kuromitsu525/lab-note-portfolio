@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "web": "python3 -m http.server 53101 --bind 127.0.0.1"
+  },
   "dependencies": {
     "wrangler": "^4.86.0"
   }
