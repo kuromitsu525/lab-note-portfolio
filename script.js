@@ -412,6 +412,7 @@ function getReportProblems(segments) {
         if (segment.audioUploadStatus === "failed") problems.push(`音声${index + 1}の保存失敗: ${segment.audioUploadError || "保存できませんでした。再度保存してください。"}`);
         if (segment.transcriptUploadStatus === "failed") problems.push(`テキストの保存失敗: ${segment.transcriptUploadError}`);
         if (segment.aiEnqueueStatus === "failed") problems.push(`AI処理の登録失敗: ${segment.aiEnqueueError}`);
+        if (segment.aiPresentationEsaWarning) problems.push(`個人発表用esaを参照できませんでした: ${segment.aiPresentationEsaWarning}`);
         if (["failed", "retrying"].includes(segment.aiQueueStatus) && segment.aiStatusError) {
             problems.push(`${segment.aiQueueStatus === "retrying" ? "自動再試行中" : "処理失敗"}: ${segment.aiStatusError}`);
         }
@@ -545,6 +546,7 @@ async function refreshAiJobStatuses() {
                 changed = updateAiJobFields(jobId, {
                     aiQueueStatus: result.status,
                     aiStatusError: result.error || "",
+                    aiPresentationEsaWarning: result.presentationEsaWarning || "",
                     aiStage: result.stage || "",
                     aiEsaUrl: resolvedEsaUrl,
                     aiEsaPostNumber: result.esaPostNumber || null,
