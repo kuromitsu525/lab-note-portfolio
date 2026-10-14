@@ -100,7 +100,7 @@ for (const speaker of ["announcements", "kuro"]) {
     t.mock.method(globalThis, "fetch", async (url, options = {}) => {
       if (url === "https://s3.kajilab.dev/lab-note/test.txt") return new Response("教授または学生の発言");
       if (url.startsWith("https://api.esa.io/v1/teams/kjlb/posts?q=")) {
-        return Response.json({posts: [{number: 123, body_md: original}]});
+        return Response.json({posts: [{number: 123, category: "1.進捗報告(個人)/2026年度/3.B3/kuro/10/5", body_md: original}]});
       }
       if (url === "https://api.esa.io/v1/teams/kjlb/posts/123") {
         if (options.method === "PATCH") {
@@ -164,6 +164,73 @@ test("全テンプレートで新規esa記事の連絡事項欄に反映でき�
     assert.ok(created.category.endsWith("/2026/10/05"));
     assert.equal(patched.body_md, updateAnnouncementsSection(created.body_md, summary));
   }
+});
+
+test("個人進捗報告は完全なカテゴリ階層と日付で検索する", async t => {
+  t.mock.method(console, "log", () => {});
+  const env = createEnv();
+  const minutes = original.replace("## **kuro**", "## **yu-dai**");
+  const seminarMinutes = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8")
+    .match(/seminar3:\s*\{[\s\S]*?markdown:\s*`([\s\S]*?)`\s*\n\s*\}/)?.[1];
+  assert.ok(seminarMinutes);
+  let aiInput;
+  const generated = "## **yu-dai**\n### [進捗]\n- 進捗を要約\n<br>";
+  env.AI = { async run(model, input) { aiInput = input; return {response: generated}; } };
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    if (url === "https://s3.kajilab.dev/lab-note/test.txt") return new Response("UWBの実験を実施");
+    if (url.startsWith("https://api.esa.io/v1/teams/kjlb/posts?q=")) {
+      requests.push(new URL(url).searchParams.get("q"));
+      if (requests.at(-1).includes('category:"1.進捗報告')) return Response.json({posts: [{number: 10375,
+        category: "1.進捗報告(個人)/2026年度/3.B3/yu-dai/10/12/統合してその後",
+        body_md: "個人の進捗報告本文"}]});
+      return Response.json({posts: [{number: 123, body_md: seminarMinutes}]});
+    }
+    if (url === "https://api.esa.io/v1/teams/kjlb/posts/10375") return Response.json({
+      number: 10375, name: "統合してその後", body_md: "個人の進捗報告本文", url: "https://kjlb.esa.io/posts/10375"
+    });
+    if (url === "https://api.esa.io/v1/teams/kjlb/posts/123") return Response.json({body_md: minutes});
+    if (options.method === "PATCH") return Response.json({number: 123});
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  await worker.queue({messages: [{body: {jobId: "presentation-search", templateKey: "seminar3",
+    speaker: "yu-dai", meetingDate: "2026-10-12", transcriptUrl: "https://s3.kajilab.dev/lab-note/test.txt"},
+    attempts: 3, ack() {}, retry() { assert.fail("Unexpected retry"); }}]}, env);
+  assert.equal(requests[0], 'category:"1.進捗報告(個人)/2026年度/3.B3/yu-dai/10/12"');
+  assert.ok(aiInput.messages[0].content.includes("個人の進捗報告本文"));
+  assert.equal(env.statuses.get("presentation-search").presentationEsaWarning, "");
+});
+
+test("個人進捗報告の検索で、カテゴリが一致しない先頭記事を採用しない", async t => {
+  t.mock.method(console, "log", () => {});
+  const env = createEnv();
+  const minutes = original.replace("## **kuro**", "## **yu-dai**");
+  const seminarMinutes = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8")
+    .match(/seminar3:\s*\{[\s\S]*?markdown:\s*`([\s\S]*?)`\s*\n\s*\}/)?.[1];
+  assert.ok(seminarMinutes);
+  let aiInput;
+  env.AI = { async run(model, input) { aiInput = input; return {response: "## **yu-dai**\n### [進捗]\n- 要約\n<br>"}; } };
+  let postFetchCount = 0;
+  t.mock.method(globalThis, "fetch", async url => {
+    if (url === "https://s3.kajilab.dev/lab-note/test.txt") return new Response("文字起こし");
+    if (url.startsWith("https://api.esa.io/v1/teams/kjlb/posts?q=")) {
+      const query = new URL(url).searchParams.get("q") || "";
+      if (query.includes('category:"1.進捗報告')) return Response.json({posts: [
+        {number: 44, category: "1.進捗報告(個人)/2025年度/3.B3/yu-dai/10/12"}
+      ]});
+      return Response.json({posts: [{number: 123, body_md: seminarMinutes}]});
+    }
+    if (url.includes("/posts/44")) { postFetchCount++; return Response.json({number: 44, body_md: "誤った報告"}); }
+    if (url.includes("/posts/123")) return Response.json({body_md: seminarMinutes});
+    return Response.json({number: 123});
+  });
+  await worker.queue({messages: [{body: {jobId: "presentation-miss", templateKey: "seminar3",
+    speaker: "yu-dai", meetingDate: "2026-10-12", transcriptUrl: "https://s3.kajilab.dev/lab-note/test.txt"},
+    attempts: 3, ack() {}, retry() { assert.fail("Unexpected retry"); }}]}, env);
+  assert.equal(postFetchCount, 0);
+  assert.ok(aiInput.messages[0].content.includes("参照できませんでした"));
+  assert.ok(!aiInput.messages[0].content.includes("誤った報告"));
+  assert.match(env.statuses.get("presentation-miss").presentationEsaWarning, /見つかりませんでした/);
 });
 
 test("連絡事項の音声・テキストに署名URLを発行できる（外部通信なし）", async () => {

@@ -70,7 +70,11 @@ async function fetchPresentationEsa(
     }
 
     const data: any = await response.json();
-    return { title: data.name || "", content: data.body_md || "", url: data.url || trimmedUrl };
+    const content = typeof data.body_md === "string" ? data.body_md : "";
+    if (!content.trim()) {
+      return { title: data.name || "", content: "", url: data.url || trimmedUrl, error: "記事本文が空でした" };
+    }
+    return { title: data.name || "", content, url: data.url || trimmedUrl };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { title: "", content: "", url: trimmedUrl, error: `取得失敗 (${message})` };
@@ -87,29 +91,59 @@ async function resolvePresentationEsa(
     return fetchPresentationEsa(manualUrl, accessToken);
   }
 
-  const [, month, day] = meetingDate.split("-");
-  if (!month || !day) return { title: "", content: "", url: "" };
+  const dateMatch = meetingDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!dateMatch) {
+    return { title: "", content: "", url: "", error: `報告日が正しくありません: ${meetingDate}` };
+  }
+  const [, year, month, day] = dateMatch;
+  const normalizedMonth = String(Number(month));
+  const normalizedDay = String(Number(day));
+  const dateCategories = [[month, day], [normalizedMonth, normalizedDay]];
+  const baseCategory = `1.進捗報告(個人)/${year}年度/3.B3/${speaker}`;
+  const queries = dateCategories.map(([categoryMonth, categoryDay]) => ({
+    date: `${categoryMonth}/${categoryDay}`,
+    categoryMonth,
+    categoryDay,
+    query: `category:"${baseCategory}/${categoryMonth}/${categoryDay}"`
+  }));
 
-  const dates = [`${month}/${day}`, `${Number(month)}/${Number(day)}`];
+  const normalizeCategory = (category: unknown) => typeof category === "string"
+    ? category.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").toLowerCase()
+    : "";
+
   try {
-    for (const date of dates) {
-      const query = encodeURIComponent(`category:1.進捗報告(個人) category:${speaker} category:${date}`);
-      const response = await fetch(`https://api.esa.io/v1/teams/kjlb/posts?q=${query}&per_page=1`, {
+    for (const { date, categoryMonth, categoryDay, query: rawQuery } of queries) {
+      const query = encodeURIComponent(rawQuery);
+      const response = await fetch(`https://api.esa.io/v1/teams/kjlb/posts?q=${query}&per_page=100`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      if (!response.ok) continue;
+      if (!response.ok) {
+        console.warn(`esa記事の自動検索に失敗しました: query=${rawQuery}, HTTP=${response.status}`);
+        continue;
+      }
 
       const data: any = await response.json();
-      const post = data.posts?.[0];
+      const posts = Array.isArray(data.posts) ? data.posts : [];
+      const post = posts.find((candidate: any) => {
+        const category = normalizeCategory(candidate.category);
+        const expectedPrefix = normalizeCategory(baseCategory);
+        const pathParts = category.split("/");
+        const expectedParts = expectedPrefix.split("/");
+        const hasExpectedPrefix = expectedParts.every((part, index) => pathParts[index] === part);
+        const hasExpectedDate = pathParts.some((part, index) => index >= expectedParts.length &&
+          (part === categoryMonth && pathParts[index + 1] === categoryDay ||
+            part === normalizedMonth && pathParts[index + 1] === normalizedDay));
+        return hasExpectedPrefix && hasExpectedDate;
+      });
       if (post) {
-        return {
-          title: post.name || "",
-          content: post.body_md || "",
-          url: post.url || `https://kjlb.esa.io/posts/${post.number}`
-        };
+        if (!post.url && !post.number) continue;
+        const postUrl = post.url || `https://kjlb.esa.io/posts/${post.number}`;
+        const result = await fetchPresentationEsa(postUrl, accessToken);
+        console.log(`esa発表資料の取得結果: query=${rawQuery}, title=${result.title}, url=${result.url}, contentLength=${result.content.length}, error=${result.error || "なし"}`);
+        return result;
       }
     }
-    return { title: "", content: "", url: "", error: `${speaker}さんの進捗報告記事が見つかりませんでした` };
+    return { title: "", content: "", url: "", error: `${baseCategory}/${dateCategories[0].join("/")} の進捗報告記事が見つかりませんでした` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { title: "", content: "", url: "", error: `検索エラー (${message})` };
@@ -829,9 +863,15 @@ export default {
           throw new Error("取得した文字起こしが空です。");
         }
 
-        const presentation = isAnnouncements
-          ? { title: "", content: "", url: "" }
-          : await resolvePresentationEsa(speaker, meetingDate, presentationEsaUrl, env.ESA_ACCESS_TOKEN);
+        let presentation: PresentationEsaInfo = { title: "", content: "", url: "" };
+        if (!isAnnouncements) {
+          try {
+            presentation = await resolvePresentationEsa(speaker, meetingDate, presentationEsaUrl, env.ESA_ACCESS_TOKEN);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            presentation = { title: "", content: "", url: "", error: `取得失敗 (${message})` };
+          }
+        }
 
         const [yyyy, mm, dd] = meetingDate.split("-");
         const postCategory = `${selectedTemplate.categoryPrefix}/${yyyy}/${mm}/${dd}`;
@@ -882,21 +922,25 @@ export default {
         const oldSpeakerBlock = match?.[1] || "";
 
         const presentationContext = presentation.content
-          ? `\n\n【個人発表用esa記事】\nタイトル: ${presentation.title}\n${presentation.content.slice(0, 4000)}`
+          ? `\n\n【要約の主資料: 個人発表用esa記事】\nタイトル: ${presentation.title}\nURL: ${presentation.url}\n本文（先頭12000文字）:\n${presentation.content.slice(0, 12000)}\n\nこのesa本文に書かれた研究内容・進捗・結果・今後の予定を要約の中心にしてください。文字起こしは会議での補足、更新点、質疑の確認に使ってください。`
           : presentation.error
             ? `\n\n【個人発表用esa記事】\n参照できませんでした: ${presentation.error}`
             : "";
         const systemPrompt = isAnnouncements ? ANNOUNCEMENTS_PROMPT : `あなたは優秀な議事録作成アシスタントです。
-入力された【文字起こし】をもとに、以下の【対象話者のMarkdownブロック】の該当項目（[進捗]、[議論の内容]など）の下に、箇条書きで要約を追記して出力してください。
+      個人発表用esa記事が入力されている場合は、それを要約の主資料として扱い、記事に書かれた具体的な内容を必ず議事録内の該当話者欄へ反映してください。文字起こしだけを要約してesa記事の内容を省略してはいけません。文字起こしは会議中の補足・更新・議論を加えるために使ってください。esa記事がない場合に限り、文字起こしを主資料にしてください。
+      以下の既存Markdownの該当項目（[進捗]、[議論の内容]など）の下に、記事の内容を保った具体的な箇条書きで追記して出力してください。
 
       ${presentationContext}
 
 【厳守するルール】
 1. 見出し（## や ###）や改行、一番下の <br> などのMarkdown構造は絶対に崩さず、そのまま出力すること。
 2. 余計な挨拶や解説、Markdown記号(\`\`\`markdown など)は一切含めず、純粋なテキストのみを返してください。
-3. 該当する文字起こしの内容がない項目は、何も追記せずに空のままにしてください。
+3. esa記事に書かれた進捗は文字起こしに同じ発言がなくても省略せず、該当する項目に要約して記載してください。esa記事にも文字起こしにも根拠がない内容は追加しないでください。
+4. 「UWBについて研究を進めている」のような抽象的な表現で終わらせず、UWBが何を指すか、何を目的に、どの対象へ、どの手法・データ・実験で取り組んでいるかを、esa記事を中心に具体化してください。
+5. 各トピックは可能な限り「対象・目的・実施内容・結果または分かったこと・次の作業」が分かる粒度にしてください。根拠がない内容は推測で補わず、「確認できなかった」としてください。
+6. 専門用語や略語は、記事や文字起こしに説明があれば正式名称や役割を併記してください。説明がなければ意味を創作せず、用語そのものを残してください。
 
-【対象話者のMarkdownブロック】
+【更新対象の既存Markdown】
 ${oldSpeakerBlock}`;
 
         console.log(`🤖 [3/5] AIに要約とMarkdown生成を依頼中... (数十秒〜数分かかります)`);
@@ -908,7 +952,7 @@ ${oldSpeakerBlock}`;
             { role: "system", content: systemPrompt },
             { role: "user", content: `【文字起こし】\n${message}` }
           ],
-          max_tokens: isAnnouncements ? 2048 : 1024
+          max_tokens: isAnnouncements ? 2048 : 1536
         });
 
         console.log(`✅ [4/5] AIの生成完了！`);
@@ -956,7 +1000,8 @@ ${oldSpeakerBlock}`;
             speaker,
             templateKey,
             esaPostNumber: targetPostNumber,
-            esaUrl: `https://kjlb.esa.io/posts/${targetPostNumber}`
+            esaUrl: `https://kjlb.esa.io/posts/${targetPostNumber}`,
+            presentationEsaWarning: presentation.error || ""
           });
           console.log(`🎉 処理がすべて完了しました！esaを確認してください。`);
         } else {
