@@ -822,8 +822,17 @@ recordingDate.addEventListener("change", () => {
 restoreDraftFromBrowser().then(refreshAiJobStatuses);
 setInterval(refreshAiJobStatuses, 10000);
 
+// Tauri(WKWebView)では標準のconfirm()が表示されずにfalseを返すため、dialogプラグインを使う。
+function showConfirm(message) {
+    const tauriDialog = window.__TAURI__?.dialog;
+    if (tauriDialog) {
+        return tauriDialog.confirm(message, { kind: "warning" });
+    }
+    return Promise.resolve(confirm(message));
+}
+
 clearDraftButton.addEventListener("click", async () => {
-    const shouldClear = confirm(
+    const shouldClear = await showConfirm(
         "ブラウザ内の全報告会の録音・文字起こし・処理状況をリセットしますか？未保存のデータは失われます。RustFSとesaに保存済みのデータは削除されません。"
     );
 
