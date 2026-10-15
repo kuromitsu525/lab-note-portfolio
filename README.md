@@ -1,42 +1,47 @@
 # Lab Note
 
+## 構成
+
+pnpmワークスペースのモノレポです。
+
+| ディレクトリ | 内容 | ポート |
+| --- | --- | --- |
+| `app` | Tauriデスクトップアプリ（画面は `app/front`）。起動時にKotoba-Whisperサーバーも立ち上げる | 53102（Whisper） |
+| `upload_api` | RustFS署名用Worker | 53103 |
+| `ai_api` | AI要約・esa反映用Worker | 53104 |
+
 ## 初回セットアップ
 
-### 1. whisper.cppとKotoba-Whisper
-
-`whisper.cpp`本体はGit submoduleとして管理します。ビルド結果と
-Kotoba-Whisperモデルは容量が大きいため、GitHubには含まれていません。
-初めて使用するPCでは、プロジェクトのルートで次の準備が必要です。
-
-必要なコマンドは`git`、`cmake`、`curl`です。
-
-#### whisper.cppの取得
+[mise](https://mise.jdx.dev/) を使います。`git` と `curl` を用意したうえで、
+プロジェクトのルートで次を実行します。
 
 ```bash
-git submodule update --init --recursive
+mise install
+mise run setup
 ```
 
-submoduleは確認済みコミットに固定されるため、他のPCでも同じ実装を使用できます。
+`mise install` は `mise.toml` で固定したNode.js・pnpm・Rust・CMakeを入れます
+（Node.js `24.19.0`、pnpm `11.20.0`、CMake `4.4.4`）。
+`mise run setup` は次のタスクをまとめて実行します。個別に `mise run setup:model` のようにも実行できます。
 
-#### whisper-serverのビルド
+| タスク | 内容 |
+| --- | --- |
+| `setup:submodule` | `whisper.cpp` のsubmoduleを取得（`git submodule update --init --recursive`） |
+| `setup:model` | Kotoba-Whisperモデルを未取得ならダウンロードし、SHA-256を確認 |
+| `setup:deps` | `pnpm install --frozen-lockfile` |
+| `setup:dev-vars` | `upload_api` と `ai_api` に `.dev.vars` がなければ `.dev.vars.example` からコピー |
 
-```bash
-cmake -S app/whisper.cpp -B app/whisper.cpp/build
-cmake --build app/whisper.cpp/build --config Release -j
-```
+コピーされた `.dev.vars` には実際の値を設定してください。
+実際のアクセスキーやトークンをGitHubへコミットしないでください。
 
-#### Kotoba-Whisperモデルのダウンロード
+`whisper-server` は `pnpm dev:app` の起動時に `app/whisper.cpp/build-tauri` へ
+自動でビルドされるため、手動でのビルドは不要です。
 
-```bash
-curl -L https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin -o app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
-```
+### whisper.cppとKotoba-Whisperについて
 
-次の2ファイルが作成されていれば準備完了です。
-
-```text
-app/whisper.cpp/build/bin/whisper-server
-app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
-```
+`whisper.cpp`本体はGit submoduleとして管理し、確認済みコミットに固定しているため、
+他のPCでも同じ実装を使用できます。ビルド結果とKotoba-Whisperモデルは
+容量が大きいため、GitHubには含まれていません。
 
 #### whisper.cppのバージョンとモデルのハッシュ値
 
@@ -72,77 +77,44 @@ Linuxでは `shasum -a 256` の代わりに `sha256sum` も使えます。
 
 既に別の版を取得している場合は、本体の変更を確認・退避してから、次の手順で
 コミットをそろえて再ビルドしてください。コミットを変えるだけでは、以前に
-ビルドした実行ファイルは更新されません。Whisperサーバーは停止してから作業します。
+ビルドした実行ファイルは更新されません。アプリは終了してから作業します。
 
 ```bash
 git -C app/whisper.cpp fetch origin
 git -C app/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
-cmake -S app/whisper.cpp -B app/whisper.cpp/build
-cmake --build app/whisper.cpp/build --config Release -j
+cmake -S app/whisper.cpp -B app/whisper.cpp/build-tauri -DCMAKE_BUILD_TYPE=Release
+cmake --build app/whisper.cpp/build-tauri --config Release --target whisper-server -j
 ```
 
 モデルのSHA-256が異なる場合は、ダウンロードした版・量子化形式が同じか、
 ダウンロードが完了しているかを確認してください。ファイル名が同じでも、
-中身が同じとは限りません。上のダウンロードURLは `main` を参照するため、
-取得後に必ずハッシュ値も確認してください。
+中身が同じとは限りません。ダウンロードURLは `main` を参照するため、
+`mise run setup:model` がハッシュ値の不一致を報告した場合は、
+モデルファイルを削除してから再実行してください。
 
-Webアプリで使うモデルは `start-local-whisper.sh` の `MODEL_FILE` で指定しています。
-`transcribe.py` のPython版Whisper（`base`）とは別の処理です。
+アプリで使うモデルは `app/src-tauri/tauri.conf.json` の `bundle.resources` と
+`app/src-tauri/src/lib.rs` で指定しています。
 本体とモデルが一致しても、マイク・入力設定・周囲の雑音・ビルド環境によって
 文字起こしの結果は変わることがあります。
 
-### 2. Workerの依存関係
-
-```bash
-npm --prefix worker/lab-note-worker install
-```
-
-```bash
-npx --yes pnpm@11.20.0 --dir workers-ai-test install --frozen-lockfile
-```
-
-AI・esa用Workerは `pnpm-lock.yaml` の版を再現するため、上記のpnpmで導入します。
-起動は以下の `npm run dev` で構いません。
-
-各Workerの`.dev.vars.example`を参考に、ローカル専用の`.dev.vars`を用意します。
-実際のアクセスキーやトークンをGitHubへコミットしないでください。
-
 ## ローカル起動
 
-開発時は4つのターミナルで、それぞれ次を起動します。
-
-### Web画面（ポート53101）
+プロジェクトのルートで次を実行すると、アプリと2つのWorkerをまとめて起動します。
 
 ```bash
-npm run web
+pnpm dev
 ```
 
-`http://127.0.0.1:53101` を開きます。このWebサーバーはファイル変更による
-自動リロードを行わないため、AI処理中にWranglerのローカル状態が更新されても
-録音は中断されません。画面のコードを変更した場合は、ブラウザを手動で再読み込みします。
+個別に起動する場合は次のスクリプトを使います。
 
-### ローカルKotoba-Whisper（ポート53102）
+| コマンド | 起動するもの |
+| --- | --- |
+| `pnpm dev:app` | Tauriアプリ（Kotoba-Whisperサーバーを含む） |
+| `pnpm dev:api` | RustFS署名用WorkerとAI要約・esa反映用Worker |
+| `pnpm dev:upload` | RustFS署名用Workerのみ |
+| `pnpm dev:ai` | AI要約・esa反映用Workerのみ |
 
-```bash
-./start-local-whisper.sh
-```
-
-### RustFS署名用Worker（ポート53103）
-
-```bash
-cd worker/lab-note-worker
-npm run dev
-```
-
-### AI要約・esa反映用Worker（ポート53104）
-
-```bash
-cd workers-ai-test
-npm run dev
-```
-
-VS CodeのLive Serverを使う場合は、`.vscode/settings.json`で`.wrangler`の変更を
-監視対象から除外しています。設定を変更した後はLive Serverを再起動してください。
+画面のコード（`app/front`）を変更した場合は、アプリの画面を再読み込みします。
 
 「保存してAI要約」後の進み具合は、報告状況に表示します。
 AI処理の受付・生成、esaへの投稿を確認でき、失敗時は「アップロード失敗」
@@ -155,8 +127,8 @@ RustFSとesaに保存済みのデータは削除しません。
 
 AI・esa用WorkerのWranglerは `4.147.0` に固定しています。
 既存の `pnpm-lock.yaml` に合わせて依存関係を更新する場合は、
-`workers-ai-test` 内で `npx --yes pnpm@11.20.0 install --frozen-lockfile` を実行してください。
-更新前から起動しているWorkerは `Ctrl+C` で終了し、`npm run dev` で起動し直します。
+プロジェクトのルートで `pnpm install --frozen-lockfile` を実行してください。
+更新前から起動しているWorkerは `Ctrl+C` で終了し、`pnpm dev:ai` で起動し直します。
 
 接続が切れると、報告状況に「AIサーバーに接続できません」と表示します。
 サーバー再起動後は10秒間隔で元の処理IDを確認し、取得できた状態に表示を戻します。
@@ -178,7 +150,7 @@ RustFSでは、他の報告者と同じ日付フォルダに
 `announcements_audio_01.webm`、`announcements_transcript_01.txt` のように保存します。
 音声の拡張子はブラウザにより異なり、ファイル番号は既存ファイルに応じて増えます。
 
-連絡事項には専用プロンプト（`workers-ai-test/src/announcements.ts`）を使います。
+連絡事項には専用プロンプト（`ai_api/src/announcements.ts`）を使います。
 学生の進捗報告と自動で分類する仕組みではないため、録音前に対象を選んでください。
 要約はesaの既存の「連絡事項」欄に反映し、学生の欄には入れません。
 AI生成部分は `<!-- lab-note:announcements:start -->` と
@@ -186,22 +158,30 @@ AI生成部分は `<!-- lab-note:announcements:start -->` と
 esa上で手書きの内容を残したい場合は、この目印の外に記入してください。
 目印や連絡事項の見出しが壊れている場合は更新を中止します。
 
-Node.js 24で、外部通信・AI利用・esa投稿を行わずにテストできます。
+外部通信・AI利用・esa投稿を行わずにテストできます。
+プロジェクトのルートで次を実行すると、全パッケージのテストを実行します。
 
 ```bash
-npm --prefix workers-ai-test test
+pnpm test
 ```
 
 ## Kotoba-Whisperの確認
 
-プロジェクトのルートで次を実行します。
+`pnpm dev:app` でアプリを起動すると、`whisper-server` がサイドカーとして
+ポート53102で自動的に起動し、アプリの終了とともに停止します。
+初回起動ではビルドとMetalの準備に時間がかかることがあります。
+
+アプリを使わずにWhisperサーバーだけを動かす場合は、`app/whisper.cpp/build` へ
+ビルドしてから `app/start-local-whisper.sh` を実行します。
+アプリと同じポートを使うため、同時には起動しないでください。
 
 ```bash
-./start-local-whisper.sh
+cmake -S app/whisper.cpp -B app/whisper.cpp/build
+cmake --build app/whisper.cpp/build --config Release -j
+./app/start-local-whisper.sh
 ```
 
-初回起動ではMetalの準備に時間がかかることがあります。次の表示が出てから
-Lab Noteを開いてください。
+次の表示が出れば起動完了です。停止は `Ctrl+C` で行います。
 
 ```text
 whisper server listening at http://0.0.0.0:53102
@@ -214,8 +194,6 @@ Lab Noteはマイク音声を16kHz PCMへ変換し、約8秒ごとのWAVデー�
 音声区間の境界で単語が欠けにくいよう、各区間には直前約1秒の音声を重ねます。
 重なった部分の文字列は、画面へ追加するときに可能な範囲で除去します。
 
-サーバーを停止する場合は、起動したターミナルで `Ctrl+C` を押します。
-
 ## 新しいメンバーを追加する場合
 
 現在はメンバー情報が画面とAI・esa用Workerに分かれているため、
@@ -223,8 +201,8 @@ Lab Noteはマイク音声を16kHz PCMへ変換し、約8秒ごとのWAVデー�
 
 | 変更する場所 | 追加する内容 | 役割 |
 | --- | --- | --- |
-| `script.js` の `meetingGroups` | 該当する報告会の配列に名前を追加 | 名前ボタンと報告状況に表示する |
-| `workers-ai-test/src/index.ts` の `SPEAKERS` | 同じ報告会の配列に同じ名前を追加 | そのメンバーのAI処理を受け付ける |
+| `app/front/script.js` の `meetingGroups` | 該当する報告会の配列に名前を追加 | 名前ボタンと報告状況に表示する |
+| `ai_api/src/index.ts` の `SPEAKERS` | 同じ報告会の配列に同じ名前を追加 | そのメンバーのAI処理を受け付ける |
 | 同ファイルの `TEMPLATES` | 該当するテンプレートの出席者一覧と個人の進捗報告欄を追加 | 新規esa記事に本人の欄を用意する |
 
 画面側の報告会名とWorker側のキーは、`3年セミナー` → `seminar3`、
@@ -253,7 +231,7 @@ AI処理は `## **名前**` から `<br>` までを本人の欄として探す�
 
 **作成済みのesa記事には、テンプレートの変更は自動反映されません。**
 既存の記事へ追加メンバーの要約を投稿する場合は、esa上でも出席者一覧と本人の個人欄を追加してください。
-変更後はAI・esa用Workerを再起動し、Web画面を再読み込みします。
+変更後はAI・esa用Workerを再起動し、アプリの画面を再読み込みします。
 
 既存の報告会にメンバーを追加するだけなら、RustFS署名用Workerの変更や
 メンバー用フォルダの作成は不要です。新しい報告会自体を増やす場合は、
