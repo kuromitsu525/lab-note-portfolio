@@ -196,7 +196,7 @@ test("個人進捗報告は完全なカテゴリ階層と日付で検索する",
   await worker.queue({messages: [{body: {jobId: "presentation-search", templateKey: "seminar3",
     speaker: "yu-dai", meetingDate: "2026-10-12", transcriptUrl: "https://s3.kajilab.dev/lab-note/test.txt"},
     attempts: 3, ack() {}, retry() { assert.fail("Unexpected retry"); }}]}, env);
-  assert.equal(requests[0], 'category:"1.進捗報告(個人)/2026年度/3.B3/yu-dai/10/12"');
+  assert.equal(requests[0], 'category:"1.進捗報告(個人)/2026年度" yu-dai');
   assert.ok(aiInput.messages[0].content.includes("個人の進捗報告本文"));
   assert.equal(env.statuses.get("presentation-search").presentationEsaWarning, "");
 });

@@ -96,54 +96,56 @@ async function resolvePresentationEsa(
     return { title: "", content: "", url: "", error: `報告日が正しくありません: ${meetingDate}` };
   }
   const [, year, month, day] = dateMatch;
+  const speakerGrade = SPEAKER_GRADES[speaker];
+  if (!speakerGrade) {
+    return { title: "", content: "", url: "", error: `${speaker}さんの学年区分が登録されていません` };
+  }
   const normalizedMonth = String(Number(month));
   const normalizedDay = String(Number(day));
   const dateCategories = [[month, day], [normalizedMonth, normalizedDay]];
-  const baseCategory = `1.進捗報告(個人)/${year}年度/3.B3/${speaker}`;
-  const queries = dateCategories.map(([categoryMonth, categoryDay]) => ({
-    date: `${categoryMonth}/${categoryDay}`,
-    categoryMonth,
-    categoryDay,
-    query: `category:"${baseCategory}/${categoryMonth}/${categoryDay}"`
-  }));
+  const yearCategory = `1.進捗報告(個人)/${year}年度`;
+  const query = `category:"${yearCategory}" ${speaker}`;
 
   const normalizeCategory = (category: unknown) => typeof category === "string"
     ? category.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").toLowerCase()
     : "";
 
   try {
-    for (const { date, categoryMonth, categoryDay, query: rawQuery } of queries) {
-      const query = encodeURIComponent(rawQuery);
-      const response = await fetch(`https://api.esa.io/v1/teams/kjlb/posts?q=${query}&per_page=100`, {
+    const rawQuery = query;
+    let post: any = null;
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await fetch(`https://api.esa.io/v1/teams/kjlb/posts?q=${encodeURIComponent(rawQuery)}&per_page=100&page=${page}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       if (!response.ok) {
-        console.warn(`esa記事の自動検索に失敗しました: query=${rawQuery}, HTTP=${response.status}`);
-        continue;
+        return { title: "", content: "", url: "", error: `esa検索エラー (HTTP ${response.status})` };
       }
 
       const data: any = await response.json();
       const posts = Array.isArray(data.posts) ? data.posts : [];
-      const post = posts.find((candidate: any) => {
-        const category = normalizeCategory(candidate.category);
-        const expectedPrefix = normalizeCategory(baseCategory);
-        const pathParts = category.split("/");
-        const expectedParts = expectedPrefix.split("/");
-        const hasExpectedPrefix = expectedParts.every((part, index) => pathParts[index] === part);
-        const hasExpectedDate = pathParts.some((part, index) => index >= expectedParts.length &&
-          (part === categoryMonth && pathParts[index + 1] === categoryDay ||
-            part === normalizedMonth && pathParts[index + 1] === normalizedDay));
-        return hasExpectedPrefix && hasExpectedDate;
-      });
-      if (post) {
-        if (!post.url && !post.number) continue;
-        const postUrl = post.url || `https://kjlb.esa.io/posts/${post.number}`;
-        const result = await fetchPresentationEsa(postUrl, accessToken);
-        console.log(`esa発表資料の取得結果: query=${rawQuery}, title=${result.title}, url=${result.url}, contentLength=${result.content.length}, error=${result.error || "なし"}`);
-        return result;
+      totalPages = Number.isInteger(data.total_pages) && data.total_pages > 0 ? data.total_pages : 1;
+      post = posts.find((candidate: any) => {
+        const pathParts = normalizeCategory(candidate.category).split("/");
+        const gradeIndex = pathParts.findIndex(part => part === speakerGrade.toLowerCase() || part.endsWith(`.${speakerGrade.toLowerCase()}`));
+        if (gradeIndex < 0 || pathParts[gradeIndex + 1] !== speaker.toLowerCase()) return false;
+        return dateCategories.some(([categoryMonth, categoryDay]) => pathParts.some((part, index) =>
+          index > gradeIndex + 1 && part === categoryMonth && pathParts[index + 1] === categoryDay
+        ));
+      }) || null;
+      page += 1;
+    } while (!post && page <= totalPages);
+    if (post) {
+      if (!post.url && !post.number) {
+        return { title: "", content: "", url: "", error: "検索記事にURLまたは記事番号がありません" };
       }
+      const postUrl = post.url || `https://kjlb.esa.io/posts/${post.number}`;
+      const result = await fetchPresentationEsa(postUrl, accessToken);
+      console.log(`esa発表資料の取得結果: query=${rawQuery}, grade=${speakerGrade}, title=${result.title}, url=${result.url}, contentLength=${result.content.length}, error=${result.error || "なし"}`);
+      return result;
     }
-    return { title: "", content: "", url: "", error: `${baseCategory}/${dateCategories[0].join("/")} の進捗報告記事が見つかりませんでした` };
+    return { title: "", content: "", url: "", error: `${yearCategory}/${speakerGrade}/${speaker}/${month}/${day} の進捗報告記事が見つかりませんでした` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { title: "", content: "", url: "", error: `検索エラー (${message})` };
@@ -151,6 +153,14 @@ async function resolvePresentationEsa(
 }
 
 // 話者リスト
+const SPEAKER_GRADES: Record<string, "B3" | "B4" | "M1" | "M2"> = {
+  machida: "B3", nao: "B3", sana: "B3", rinya: "B3", sawaki: "B3", honoka: "B3",
+  onogi: "B3", yoshitomo: "B3", yuga: "B3", "yu-dai": "B3", kuro: "B3", kazuma: "B3",
+  tada: "B4", nakamura: "B4", enami: "B4", hanada: "B4", hiroto: "B4", niwa: "B4",
+  ryuki: "B4", seiken: "B4", tatsunari: "B4", kakeru: "B4", taku: "B4",
+  natsuki: "M1", gomamono: "M1", fuseya: "M2", hayashi: "M2"
+};
+
 const SPEAKERS = {
   hci: ["fuseya", "seiken", "taku", "niwa", "machida"],
   har: ["gomamono", "enami", "nakamura", "tada", "tatsunari"],
@@ -866,7 +876,9 @@ export default {
         let presentation: PresentationEsaInfo = { title: "", content: "", url: "" };
         if (!isAnnouncements) {
           try {
-            presentation = await resolvePresentationEsa(speaker, meetingDate, presentationEsaUrl, env.ESA_ACCESS_TOKEN);
+            presentation = await resolvePresentationEsa(
+              speaker, meetingDate, presentationEsaUrl, env.ESA_ACCESS_TOKEN
+            );
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             presentation = { title: "", content: "", url: "", error: `取得失敗 (${message})` };
