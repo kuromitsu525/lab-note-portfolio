@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "lab-note-upload-api",
+	"main": "src/index.js",
+	"account_id": "c74916ed7842fe6b335885c74c1a6eed",
+	"compatibility_date": "2026-08-07",
+	"observability": {
+		"enabled": true
+	},
+	"preview_urls": false,
+	"routes": [
+		{
+			"custom_domain": true,
+			"pattern": "upload-api.labnote.kajilab.dev"
+		}
+	],
+	"upload_source_maps": true,
+	"compatibility_flags": [
+		"nodejs_compat"
+	]
+}

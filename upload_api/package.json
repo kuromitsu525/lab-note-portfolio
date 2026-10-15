@@ -1,0 +1,19 @@
+{
+  "name": "lab-note-worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --port 53103 --inspector-port 53113",
+    "start": "wrangler dev --port 53103",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.119.0"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20"
+  }
+}

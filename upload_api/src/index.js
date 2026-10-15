@@ -1,0 +1,195 @@
+import { AwsClient } from "aws4fetch";
+
+const allowedOrigins = new Set([
+    "http://127.0.0.1:53101",
+    "http://127.0.0.1:1430",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost"
+]);
+const allowedGroups = new Set(["seminar3", "hci", "har", "lbs"]);
+const allowedKinds = new Set(["audio", "transcript"]);
+const allowedExtensions = new Set(["webm", "mp4", "ogg", "txt"]);
+const allowedTranscriptKeyPatterns = [
+    /^(seminar3|hci|har|lbs)\/\d{4}\/(?:0[1-9]|1[0-2])\/(?:0[1-9]|[12]\d|3[01])\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/,
+    // 変更前に保存済みの文字起こしを、未完了のAI処理から再取得できるようにする。
+    /^(seminar3|hci|har|lbs)\/\d{4}年\/(?:[1-9]|1[0-2])月\/(?:[1-9]|[12]\d|3[01])日\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/
+];
+
+function corsHeaders(request) {
+    const headers = {
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Vary": "Origin"
+    };
+
+    const origin = request.headers.get("Origin");
+    if (allowedOrigins.has(origin)) {
+        headers["Access-Control-Allow-Origin"] = origin;
+    }
+
+    return headers;
+}
+
+function json(data, request, status = 200) {
+    return Response.json(data, { status, headers: corsHeaders(request) });
+}
+
+function isValidDate(value) {
+    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isValidSpeaker(value) {
+    return typeof value === "string" && /^[a-z0-9-]+$/.test(value);
+}
+
+function getDateFolderPath(date) {
+    const [year, month, day] = date.split("-");
+    return `${year}/${month}/${day}`;
+}
+
+function getRustFsConfig(env) {
+    const requiredKeys = [
+        "RUSTFS_ACCESS_KEY",
+        "RUSTFS_SECRET_KEY",
+        "RUSTFS_ENDPOINT",
+        "RUSTFS_REGION",
+        "RUSTFS_BUCKET"
+    ];
+    const missingKeys = requiredKeys.filter(key => !env[key]);
+
+    if (missingKeys.length > 0) {
+        throw new Error(`RustFS設定が不足しています: ${missingKeys.join(", ")}`);
+    }
+
+    return {
+        endpoint: env.RUSTFS_ENDPOINT.replace(/\/$/, ""),
+        region: env.RUSTFS_REGION,
+        bucket: env.RUSTFS_BUCKET,
+        accessKeyId: env.RUSTFS_ACCESS_KEY,
+        secretAccessKey: env.RUSTFS_SECRET_KEY
+    };
+}
+
+function createAwsClient(config) {
+    return new AwsClient({
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+        service: "s3",
+        region: config.region,
+        retries: 0
+    });
+}
+
+async function createSignedUrl(request, env) {
+    let body;
+
+    try {
+        body = await request.json();
+    } catch {
+        return json({ error: "JSON形式のリクエストが必要です。" }, request, 400);
+    }
+
+    const {
+        operation, group, date, speaker, kind, extension, number,
+        key: requestedKey
+    } = body;
+
+    if (operation === "get") {
+        if (typeof requestedKey !== "string" ||
+            !allowedTranscriptKeyPatterns.some(pattern => pattern.test(requestedKey))) {
+            return json({ error: "読み取り対象の指定が正しくありません。" }, request, 400);
+        }
+
+        const config = getRustFsConfig(env);
+        const aws = createAwsClient(config);
+        const encodedKey = requestedKey.split("/").map(encodeURIComponent).join("/");
+        const url = new URL(
+            `${config.endpoint}/${encodeURIComponent(config.bucket)}/${encodedKey}`
+        );
+        url.searchParams.set("X-Amz-Expires", "86400");
+
+        const signedRequest = await aws.sign(url.toString(), {
+            method: "GET",
+            aws: { signQuery: true }
+        });
+
+        return json({ url: signedRequest.url, key: requestedKey }, request);
+    }
+
+    if (!allowedGroups.has(group) || !isValidDate(date) ||
+        !isValidSpeaker(speaker) || !allowedKinds.has(kind)) {
+        return json({ error: "保存先の指定が正しくありません。" }, request, 400);
+    }
+
+    const config = getRustFsConfig(env);
+    const aws = createAwsClient(config);
+    const prefix = `${group}/${getDateFolderPath(date)}/${speaker}_${kind}_`;
+
+    if (operation === "list") {
+        const url = new URL(`${config.endpoint}/${encodeURIComponent(config.bucket)}`);
+        url.searchParams.set("list-type", "2");
+        url.searchParams.set("prefix", prefix);
+        url.searchParams.set("X-Amz-Expires", "300");
+
+        const signedRequest = await aws.sign(url.toString(), {
+            method: "GET",
+            aws: { signQuery: true }
+        });
+
+        return json({ url: signedRequest.url }, request);
+    }
+
+    if (operation !== "put" || !allowedExtensions.has(extension) ||
+        !Number.isInteger(number) || number < 1 || number > 9999) {
+        return json({ error: "アップロード指定が正しくありません。" }, request, 400);
+    }
+
+    if (kind === "transcript" && extension !== "txt") {
+        return json({ error: "文字起こしはtxt形式で保存してください。" }, request, 400);
+    }
+
+    if (kind === "audio" && extension === "txt") {
+        return json({ error: "音声ファイルの形式が正しくありません。" }, request, 400);
+    }
+
+    const paddedNumber = String(number).padStart(2, "0");
+    const key = `${prefix}${paddedNumber}.${extension}`;
+    const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+    const url = new URL(
+        `${config.endpoint}/${encodeURIComponent(config.bucket)}/${encodedKey}`
+    );
+    url.searchParams.set("X-Amz-Expires", "300");
+
+    const signedRequest = await aws.sign(url.toString(), {
+        method: "PUT",
+        aws: { signQuery: true }
+    });
+
+    return json({ url: signedRequest.url, key }, request);
+}
+
+export default {
+    async fetch(request, env) {
+        const url = new URL(request.url);
+
+        if (request.method === "OPTIONS") {
+            return new Response(null, { status: 204, headers: corsHeaders(request) });
+        }
+
+        if (request.method === "GET" && url.pathname === "/") {
+            return json({ name: "Lab Note Worker", status: "ready" }, request);
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/rustfs/presign") {
+            try {
+                return await createSignedUrl(request, env);
+            } catch (error) {
+                console.error("RustFS署名URLの生成に失敗しました:", error);
+                return json({ error: "署名URLを生成できませんでした。" }, request, 500);
+            }
+        }
+
+        return json({ error: "Not Found" }, request, 404);
+    }
+};

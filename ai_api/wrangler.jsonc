@@ -1,0 +1,42 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "lab-note-ai-api",
+	"account_id": "c74916ed7842fe6b335885c74c1a6eed",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-08-07",
+	"observability": {
+		"enabled": true
+	},
+	"preview_urls": false,
+	"routes": [
+		{
+			"custom_domain": true,
+			"pattern": "ai-api.labnote.kajilab.dev"
+		}
+	],
+	"ai": {
+		"binding": "AI"
+	},
+	"queues": {
+		"producers": [
+			{
+				"binding": "MINUTES_QUEUE",
+				"queue": "minutes-queue"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "minutes-queue",
+				"max_batch_size": 1,
+				"max_batch_timeout": 10,
+				"max_concurrency": 1
+			}
+		]
+	},
+	"kv_namespaces": [
+		{
+			"binding": "AI_JOB_STATUS",
+			"id": "2cef521864544647ad555ed726fb11d3"
+		}
+	]
+}
