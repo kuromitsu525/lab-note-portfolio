@@ -1,12 +1,19 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "workers-ai-test",
+	"name": "lab-note-ai-api",
 	"account_id": "c74916ed7842fe6b335885c74c1a6eed",
 	"main": "src/index.ts",
-	"compatibility_date": "2024-09-12",
+	"compatibility_date": "2026-08-07",
 	"observability": {
 		"enabled": true
 	},
+	"preview_urls": false,
+	"routes": [
+		{
+			"custom_domain": true,
+			"pattern": "ai-api.labnote.kajilab.dev"
+		}
+	],
 	"ai": {
 		"binding": "AI"
 	},
