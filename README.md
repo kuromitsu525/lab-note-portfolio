@@ -4,39 +4,38 @@
 
 ### 1. whisper.cppとKotoba-Whisper
 
-`whisper.cpp`本体、ビルド結果、Kotoba-Whisperモデルは容量が大きいため、
-GitHubには含まれていません。初めて使用するPCでは、プロジェクトのルートで
-次の準備が必要です。
+`whisper.cpp`本体はGit submoduleとして管理します。ビルド結果と
+Kotoba-Whisperモデルは容量が大きいため、GitHubには含まれていません。
+初めて使用するPCでは、プロジェクトのルートで次の準備が必要です。
 
 必要なコマンドは`git`、`cmake`、`curl`です。
 
 #### whisper.cppの取得
 
 ```bash
-git clone https://github.com/ggml-org/whisper.cpp.git vendor/whisper.cpp
-git -C vendor/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
+git submodule update --init --recursive
 ```
 
-他のPCでも同じ実装を使うため、取得後に下記の確認済みコミットへそろえます。
+submoduleは確認済みコミットに固定されるため、他のPCでも同じ実装を使用できます。
 
 #### whisper-serverのビルド
 
 ```bash
-cmake -S vendor/whisper.cpp -B vendor/whisper.cpp/build
-cmake --build vendor/whisper.cpp/build --config Release -j
+cmake -S app/whisper.cpp -B app/whisper.cpp/build
+cmake --build app/whisper.cpp/build --config Release -j
 ```
 
 #### Kotoba-Whisperモデルのダウンロード
 
 ```bash
-curl -L https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin -o vendor/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+curl -L https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin -o app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
 ```
 
 次の2ファイルが作成されていれば準備完了です。
 
 ```text
-vendor/whisper.cpp/build/bin/whisper-server
-vendor/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+app/whisper.cpp/build/bin/whisper-server
+app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
 ```
 
 #### whisper.cppのバージョンとモデルのハッシュ値
@@ -61,9 +60,9 @@ vendor/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
 プロジェクトのルートで次を実行します。
 
 ```bash
-git -C vendor/whisper.cpp rev-parse HEAD
-git -C vendor/whisper.cpp status --short
-shasum -a 256 vendor/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+git -C app/whisper.cpp rev-parse HEAD
+git -C app/whisper.cpp status --short
+shasum -a 256 app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
 ```
 
 `rev-parse HEAD` の結果は上記コミットIDと比較します。
@@ -76,10 +75,10 @@ Linuxでは `shasum -a 256` の代わりに `sha256sum` も使えます。
 ビルドした実行ファイルは更新されません。Whisperサーバーは停止してから作業します。
 
 ```bash
-git -C vendor/whisper.cpp fetch origin
-git -C vendor/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
-cmake -S vendor/whisper.cpp -B vendor/whisper.cpp/build
-cmake --build vendor/whisper.cpp/build --config Release -j
+git -C app/whisper.cpp fetch origin
+git -C app/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
+cmake -S app/whisper.cpp -B app/whisper.cpp/build
+cmake --build app/whisper.cpp/build --config Release -j
 ```
 
 モデルのSHA-256が異なる場合は、ダウンロードした版・量子化形式が同じか、

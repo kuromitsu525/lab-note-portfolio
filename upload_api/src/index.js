@@ -1,6 +1,12 @@
 import { AwsClient } from "aws4fetch";
 
-const allowedOrigin = "http://127.0.0.1:53101";
+const allowedOrigins = new Set([
+    "http://127.0.0.1:53101",
+    "http://127.0.0.1:1430",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost"
+]);
 const allowedGroups = new Set(["seminar3", "hci", "har", "lbs"]);
 const allowedKinds = new Set(["audio", "transcript"]);
 const allowedExtensions = new Set(["webm", "mp4", "ogg", "txt"]);
@@ -10,17 +16,23 @@ const allowedTranscriptKeyPatterns = [
     /^(seminar3|hci|har|lbs)\/\d{4}年\/(?:[1-9]|1[0-2])月\/(?:[1-9]|[12]\d|3[01])日\/[a-z0-9-]+_transcript_\d{2,4}\.txt$/
 ];
 
-function corsHeaders() {
-    return {
-        "Access-Control-Allow-Origin": allowedOrigin,
+function corsHeaders(request) {
+    const headers = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
         "Vary": "Origin"
     };
+
+    const origin = request.headers.get("Origin");
+    if (allowedOrigins.has(origin)) {
+        headers["Access-Control-Allow-Origin"] = origin;
+    }
+
+    return headers;
 }
 
-function json(data, status = 200) {
-    return Response.json(data, { status, headers: corsHeaders() });
+function json(data, request, status = 200) {
+    return Response.json(data, { status, headers: corsHeaders(request) });
 }
 
 function isValidDate(value) {
@@ -75,7 +87,7 @@ async function createSignedUrl(request, env) {
     try {
         body = await request.json();
     } catch {
-        return json({ error: "JSON形式のリクエストが必要です。" }, 400);
+        return json({ error: "JSON形式のリクエストが必要です。" }, request, 400);
     }
 
     const {
@@ -86,7 +98,7 @@ async function createSignedUrl(request, env) {
     if (operation === "get") {
         if (typeof requestedKey !== "string" ||
             !allowedTranscriptKeyPatterns.some(pattern => pattern.test(requestedKey))) {
-            return json({ error: "読み取り対象の指定が正しくありません。" }, 400);
+            return json({ error: "読み取り対象の指定が正しくありません。" }, request, 400);
         }
 
         const config = getRustFsConfig(env);
@@ -102,12 +114,12 @@ async function createSignedUrl(request, env) {
             aws: { signQuery: true }
         });
 
-        return json({ url: signedRequest.url, key: requestedKey });
+        return json({ url: signedRequest.url, key: requestedKey }, request);
     }
 
     if (!allowedGroups.has(group) || !isValidDate(date) ||
         !isValidSpeaker(speaker) || !allowedKinds.has(kind)) {
-        return json({ error: "保存先の指定が正しくありません。" }, 400);
+        return json({ error: "保存先の指定が正しくありません。" }, request, 400);
     }
 
     const config = getRustFsConfig(env);
@@ -125,20 +137,20 @@ async function createSignedUrl(request, env) {
             aws: { signQuery: true }
         });
 
-        return json({ url: signedRequest.url });
+        return json({ url: signedRequest.url }, request);
     }
 
     if (operation !== "put" || !allowedExtensions.has(extension) ||
         !Number.isInteger(number) || number < 1 || number > 9999) {
-        return json({ error: "アップロード指定が正しくありません。" }, 400);
+        return json({ error: "アップロード指定が正しくありません。" }, request, 400);
     }
 
     if (kind === "transcript" && extension !== "txt") {
-        return json({ error: "文字起こしはtxt形式で保存してください。" }, 400);
+        return json({ error: "文字起こしはtxt形式で保存してください。" }, request, 400);
     }
 
     if (kind === "audio" && extension === "txt") {
-        return json({ error: "音声ファイルの形式が正しくありません。" }, 400);
+        return json({ error: "音声ファイルの形式が正しくありません。" }, request, 400);
     }
 
     const paddedNumber = String(number).padStart(2, "0");
@@ -154,7 +166,7 @@ async function createSignedUrl(request, env) {
         aws: { signQuery: true }
     });
 
-    return json({ url: signedRequest.url, key });
+    return json({ url: signedRequest.url, key }, request);
 }
 
 export default {
@@ -162,11 +174,11 @@ export default {
         const url = new URL(request.url);
 
         if (request.method === "OPTIONS") {
-            return new Response(null, { status: 204, headers: corsHeaders() });
+            return new Response(null, { status: 204, headers: corsHeaders(request) });
         }
 
         if (request.method === "GET" && url.pathname === "/") {
-            return json({ name: "Lab Note Worker", status: "ready" });
+            return json({ name: "Lab Note Worker", status: "ready" }, request);
         }
 
         if (request.method === "POST" && url.pathname === "/api/rustfs/presign") {
@@ -174,10 +186,10 @@ export default {
                 return await createSignedUrl(request, env);
             } catch (error) {
                 console.error("RustFS署名URLの生成に失敗しました:", error);
-                return json({ error: "署名URLを生成できませんでした。" }, 500);
+                return json({ error: "署名URLを生成できませんでした。" }, request, 500);
             }
         }
 
-        return json({ error: "Not Found" }, 404);
+        return json({ error: "Not Found" }, request, 404);
     }
 };

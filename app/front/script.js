@@ -882,6 +882,18 @@ function getSupportedMimeType() {
     return "";
 }
 
+function blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.addEventListener("load", () => resolve(reader.result));
+        reader.addEventListener("error", () => {
+            reject(reader.error || new Error("録音データを再生用に読み込めませんでした。"));
+        });
+        reader.readAsDataURL(blob);
+    });
+}
+
 
 // ============================================================
 // Float32 → PCM 16bit
@@ -1564,12 +1576,6 @@ startButton.addEventListener(
                     // 音声再生
                     // ----------------------------------------
 
-                    const audioURL =
-                        URL.createObjectURL(
-                            audioBlob
-                        );
-
-
                     const audio =
                         document.createElement(
                             "audio"
@@ -1577,9 +1583,12 @@ startButton.addEventListener(
 
 
                     audio.controls = true;
+                    audio.preload = "metadata";
 
                     audio.src =
-                        audioURL;
+                        await blobToDataURL(
+                            audioBlob
+                        );
 
 
                     audioArea.innerHTML =

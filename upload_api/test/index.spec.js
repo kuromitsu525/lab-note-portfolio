@@ -8,6 +8,30 @@ import { describe, it, expect } from "vitest";
 import worker from "../src";
 
 describe("Lab Note worker", () => {
+	it("allows preflight requests from the Tauri development origin", async () => {
+		const request = new Request("http://example.com/api/rustfs/presign", {
+			method: "OPTIONS",
+			headers: { Origin: "http://127.0.0.1:1430" },
+		});
+
+		const response = await worker.fetch(request, {});
+
+		expect(response.status).toBe(204);
+		expect(response.headers.get("Access-Control-Allow-Origin"))
+			.toBe("http://127.0.0.1:1430");
+	});
+
+	it("does not allow unknown origins", async () => {
+		const request = new Request("http://example.com/api/rustfs/presign", {
+			method: "OPTIONS",
+			headers: { Origin: "https://example.invalid" },
+		});
+
+		const response = await worker.fetch(request, {});
+
+		expect(response.headers.has("Access-Control-Allow-Origin")).toBe(false);
+	});
+
 	it("responds with its status (unit style)", async () => {
 		const request = new Request("http://example.com");
 		// Create an empty context to pass to `worker.fetch()`.

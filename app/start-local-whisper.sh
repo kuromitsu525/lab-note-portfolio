@@ -3,7 +3,7 @@
 set -e
 
 SCRIPT_DIRECTORY="${0:A:h}"
-WHISPER_DIRECTORY="${SCRIPT_DIRECTORY}/vendor/whisper.cpp"
+WHISPER_DIRECTORY="${SCRIPT_DIRECTORY}/whisper.cpp"
 SERVER_BINARY="${WHISPER_DIRECTORY}/build/bin/whisper-server"
 MODEL_FILE="${WHISPER_DIRECTORY}/models/ggml-kotoba-whisper-v2.0-q5_0.bin"
 
@@ -16,8 +16,6 @@ if [[ ! -f "${MODEL_FILE}" ]]; then
     echo "Kotoba-Whisperモデルが見つかりません。"
     exit 1
 fi
-
-cd "${WHISPER_DIRECTORY}"
 
 exec "${SERVER_BINARY}" \
     --host 0.0.0.0 \
