@@ -1,0 +1,18 @@
+{
+  "name": "lab-note-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:app": "pnpm --filter ./app dev",
+    "dev:ai": "pnpm --filter ./ai_api dev",
+    "dev:upload": "pnpm --filter ./upload_api dev",
+    "dev:api": "pnpm --filter ./ai_api --filter ./upload_api --parallel dev",
+    "test": "pnpm -r test",
+    "deploy:ai": "pnpm --filter ./ai_api run deploy",
+    "deploy:upload": "pnpm --filter ./upload_api run deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.147.0"
+  }
+}

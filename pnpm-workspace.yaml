@@ -1,0 +1,13 @@
+packages:
+  - ai_api
+  - app
+  - upload_api
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false
+minimumReleaseAgeExclude:
+  - hono@4.13.0
+overrides:
+  # 4.64.6 は safe-chain の公開後日数チェックに弾かれるため固定
+  rollup: 4.64.3

@@ -1,6 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "workers-ai-test",
+	"account_id": "c74916ed7842fe6b335885c74c1a6eed",
 	"main": "src/index.ts",
 	"compatibility_date": "2024-09-12",
 	"observability": {
@@ -28,7 +29,7 @@
 	"kv_namespaces": [
 		{
 			"binding": "AI_JOB_STATUS",
-			"id": "e097f165e4c84ebdba5598133b82ad30"
+			"id": "2cef521864544647ad555ed726fb11d3"
 		}
 	]
 }
