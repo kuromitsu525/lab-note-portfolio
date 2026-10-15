@@ -1,172 +1,51 @@
 # Lab Note
 
-## 初回セットアップ
+pnpmワークスペースのモノレポです。
 
-### 1. whisper.cppとKotoba-Whisper
+| ディレクトリ | 内容 | ポート |
+| --- | --- | --- |
+| `app` | Tauriデスクトップアプリ（画面は `app/front`）。Kotoba-Whisperサーバーも起動する | 53102 |
+| `upload_api` | RustFS署名用Worker | 53103 |
+| `ai_api` | AI要約・esa反映用Worker | 53104 |
 
-`whisper.cpp`本体はGit submoduleとして管理します。ビルド結果と
-Kotoba-Whisperモデルは容量が大きいため、GitHubには含まれていません。
-初めて使用するPCでは、プロジェクトのルートで次の準備が必要です。
+## セットアップ
 
-必要なコマンドは`git`、`cmake`、`curl`です。
-
-#### whisper.cppの取得
-
-```bash
-git submodule update --init --recursive
-```
-
-submoduleは確認済みコミットに固定されるため、他のPCでも同じ実装を使用できます。
-
-#### whisper-serverのビルド
+[mise](https://mise.jdx.dev/)・`git`・`curl` を用意し、ルートで実行します。
 
 ```bash
-cmake -S app/whisper.cpp -B app/whisper.cpp/build
-cmake --build app/whisper.cpp/build --config Release -j
+mise install    # Node.js・pnpm・Rust・CMake
+mise run setup  # submodule取得、モデルのダウンロードとSHA-256確認、pnpm install、.dev.varsの作成
 ```
 
-#### Kotoba-Whisperモデルのダウンロード
+作成された `upload_api/.dev.vars` と `ai_api/.dev.vars` に実際の値を設定してください（コミットしないこと）。
 
-```bash
-curl -L https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin -o app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
-```
+## 起動とテスト
 
-次の2ファイルが作成されていれば準備完了です。
-
-```text
-app/whisper.cpp/build/bin/whisper-server
-app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
-```
-
-#### whisper.cppのバージョンとモデルのハッシュ値
-
-2026年10月6日に開発PCで確認した基準値です。
-本体のコミットIDはプログラムの版、モデルのSHA-256はファイル内容を識別します。
-この2つを互いに比較せず、相手のPCの同じ項目と比較してください。
-
-| 項目 | 確認した値 |
+| コマンド | 内容 |
 | --- | --- |
-| whisper.cppのソース上のバージョン | `1.9.4-dev`（正式リリースのタグではなく、下記コミットで指定） |
-| whisper.cppのコミットID | `1da4dc82fa7996d4edda05890dca65aeceaafd6d` |
-| モデル | Kotoba-Whisper v2.0、GGML形式、`q5_0`量子化 |
-| モデルファイル名 | `ggml-kotoba-whisper-v2.0-q5_0.bin` |
+| `pnpm dev` | アプリと2つのWorkerをまとめて起動 |
+| `pnpm dev:app` | Tauriアプリのみ（初回は `whisper-server` を自動ビルド） |
+| `pnpm dev:api` / `dev:upload` / `dev:ai` | Workerのみ |
+| `pnpm test` | 全パッケージのテスト（外部通信なし） |
 
-モデルファイルのSHA-256：
-
-```text
-4a3b92192b5d3578ff854a5876213e2e27af0c2d357492c2d14271e82c303658
-```
-
-プロジェクトのルートで次を実行します。
+Whisperサーバーだけを動かす場合（アプリとは同時に起動しない）：
 
 ```bash
-git -C app/whisper.cpp rev-parse HEAD
-git -C app/whisper.cpp status --short
-shasum -a 256 app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
-```
-
-`rev-parse HEAD` の結果は上記コミットIDと比較します。
-`status --short` が何も表示しなければ、本体のソースにローカル変更はありません。
-`shasum` の結果は、ファイル名の前に表示されるハッシュ値を上記SHA-256と比較します。
-Linuxでは `shasum -a 256` の代わりに `sha256sum` も使えます。
-
-既に別の版を取得している場合は、本体の変更を確認・退避してから、次の手順で
-コミットをそろえて再ビルドしてください。コミットを変えるだけでは、以前に
-ビルドした実行ファイルは更新されません。Whisperサーバーは停止してから作業します。
-
-```bash
-git -C app/whisper.cpp fetch origin
-git -C app/whisper.cpp checkout --detach 1da4dc82fa7996d4edda05890dca65aeceaafd6d
 cmake -S app/whisper.cpp -B app/whisper.cpp/build
 cmake --build app/whisper.cpp/build --config Release -j
+./app/start-local-whisper.sh
 ```
 
-モデルのSHA-256が異なる場合は、ダウンロードした版・量子化形式が同じか、
-ダウンロードが完了しているかを確認してください。ファイル名が同じでも、
-中身が同じとは限りません。上のダウンロードURLは `main` を参照するため、
-取得後に必ずハッシュ値も確認してください。
+## whisper.cppとモデルの基準値
 
-Webアプリで使うモデルは `start-local-whisper.sh` の `MODEL_FILE` で指定しています。
-`transcribe.py` のPython版Whisper（`base`）とは別の処理です。
-本体とモデルが一致しても、マイク・入力設定・周囲の雑音・ビルド環境によって
-文字起こしの結果は変わることがあります。
+| 項目 | 値 |
+| --- | --- |
+| whisper.cppのコミット | `1da4dc82fa7996d4edda05890dca65aeceaafd6d`（`1.9.4-dev`） |
+| モデル | `ggml-kotoba-whisper-v2.0-q5_0.bin` |
+| モデルのSHA-256 | `4a3b92192b5d3578ff854a5876213e2e27af0c2d357492c2d14271e82c303658` |
 
-### 2. Workerの依存関係
-
-```bash
-npm --prefix worker/lab-note-worker install
-```
-
-```bash
-npx --yes pnpm@11.20.0 --dir workers-ai-test install --frozen-lockfile
-```
-
-AI・esa用Workerは `pnpm-lock.yaml` の版を再現するため、上記のpnpmで導入します。
-起動は以下の `npm run dev` で構いません。
-
-各Workerの`.dev.vars.example`を参考に、ローカル専用の`.dev.vars`を用意します。
-実際のアクセスキーやトークンをGitHubへコミットしないでください。
-
-## ローカル起動
-
-開発時は4つのターミナルで、それぞれ次を起動します。
-
-### Web画面（ポート53101）
-
-```bash
-npm run web
-```
-
-`http://127.0.0.1:53101` を開きます。このWebサーバーはファイル変更による
-自動リロードを行わないため、AI処理中にWranglerのローカル状態が更新されても
-録音は中断されません。画面のコードを変更した場合は、ブラウザを手動で再読み込みします。
-
-### ローカルKotoba-Whisper（ポート53102）
-
-```bash
-./start-local-whisper.sh
-```
-
-### RustFS署名用Worker（ポート53103）
-
-```bash
-cd worker/lab-note-worker
-npm run dev
-```
-
-### AI要約・esa反映用Worker（ポート53104）
-
-```bash
-cd workers-ai-test
-npm run dev
-```
-
-VS CodeのLive Serverを使う場合は、`.vscode/settings.json`で`.wrangler`の変更を
-監視対象から除外しています。設定を変更した後はLive Serverを再起動してください。
-
-「保存してAI要約」後の進み具合は、報告状況に表示します。
-AI処理の受付・生成、esaへの投稿を確認でき、失敗時は「アップロード失敗」
-「AI処理失敗」「esa投稿失敗」などに表示が変わり、詳しい理由も表示します。
-「esa投稿済み ↗」から記事を新しいタブで開けます。
-報告状況上部の「記録をリセット」は、確認後にブラウザ内の全報告会の記録を消去します。
-RustFSとesaに保存済みのデータは削除しません。
-
-## AIサーバーが停止した場合
-
-AI・esa用WorkerのWranglerは `4.147.0` に固定しています。
-既存の `pnpm-lock.yaml` に合わせて依存関係を更新する場合は、
-`workers-ai-test` 内で `npx --yes pnpm@11.20.0 install --frozen-lockfile` を実行してください。
-更新前から起動しているWorkerは `Ctrl+C` で終了し、`npm run dev` で起動し直します。
-
-接続が切れると、報告状況に「AIサーバーに接続できません」と表示します。
-サーバー再起動後は10秒間隔で元の処理IDを確認し、取得できた状態に表示を戻します。
-「状況を再確認」ボタンも、AIへの再送ではなく処理状況の取得だけを行います。
-
-サーバーに接続できても処理情報が見つからない場合や、処理状況が10分以上
-更新されていない場合は「AI処理状況を要確認」と表示します。
-これは失敗確定ではありません。Workerのログとesaの投稿状況を確認してください。
-処理の重複を避けるため、状況不明の処理を自動で再送・再開することはありません。
-サーバーから「失敗」が確認できた場合は「AI処理を再実行」を利用できます。
+モデルのハッシュが合わない場合は、ファイルを削除して `mise run setup:model` を再実行します。
+whisper.cppのコミットを変えた場合は `app/whisper.cpp/build-tauri` を再ビルドしてください。
 
 ## 連絡事項の録音・要約
 
@@ -191,30 +70,6 @@ Node.js 24で、外部通信・AI利用・esa投稿を行わずにテストで�
 ```bash
 npm --prefix workers-ai-test test
 ```
-
-## Kotoba-Whisperの確認
-
-プロジェクトのルートで次を実行します。
-
-```bash
-./start-local-whisper.sh
-```
-
-初回起動ではMetalの準備に時間がかかることがあります。次の表示が出てから
-Lab Noteを開いてください。
-
-```text
-whisper server listening at http://0.0.0.0:53102
-```
-
-Lab Noteはマイク音声を16kHz PCMへ変換し、約8秒ごとのWAVデータとして
-ローカルサーバーへ送信します。録音停止時には残りの音声の処理完了を待ってから、
-報告者の文字起こしを保存します。
-
-音声区間の境界で単語が欠けにくいよう、各区間には直前約1秒の音声を重ねます。
-重なった部分の文字列は、画面へ追加するときに可能な範囲で除去します。
-
-サーバーを停止する場合は、起動したターミナルで `Ctrl+C` を押します。
 
 ## 新しいメンバーを追加する場合
 

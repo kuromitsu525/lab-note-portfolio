@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "identifier": "net.kajilab.labnote",
   "build": {
+    "beforeDevCommand": {
+      "script": "cmake -S whisper.cpp -B whisper.cpp/build-tauri -DCMAKE_BUILD_TYPE=Release && cmake --build whisper.cpp/build-tauri --config Release --target whisper-server -j",
+      "wait": true
+    },
     "beforeBuildCommand": "cmake -S whisper.cpp -B whisper.cpp/build-tauri -DCMAKE_BUILD_TYPE=Release && cmake --build whisper.cpp/build-tauri --config Release --target whisper-server -j",
     "frontendDist": "../front"
   },

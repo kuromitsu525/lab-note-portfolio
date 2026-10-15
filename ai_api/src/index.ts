@@ -23,7 +23,14 @@ type JobStatus = "queued" | "processing" | "retrying" | "completed" | "failed";
 const app = new Hono<{ Bindings: Bindings }>();
 
 app.use("/api/*", cors({
-  origin: ["http://127.0.0.1:53101", "http://localhost:53101"],
+  origin: [
+    "http://127.0.0.1:53101",
+    "http://localhost:53101",
+    "http://127.0.0.1:1430",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost"
+  ],
   allowMethods: ["GET", "POST", "OPTIONS"],
   allowHeaders: ["Content-Type"]
 }));

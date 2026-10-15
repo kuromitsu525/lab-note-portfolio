@@ -270,10 +270,10 @@ function updateTranscriptEditState() {
     transcriptHint.textContent = statusUnknown && aiBusy
         ? "AI処理の状況を確認できないため、編集を一時停止しています"
         : isUploadingReport || aiBusy
-        ? "保存・AI処理中は編集できません"
-        : transcript.readOnly
-            ? "録音停止後に編集できます"
-            : "編集内容は自動保存されます。修正後は「保存してAI要約」";
+            ? "保存・AI処理中は編集できません"
+            : transcript.readOnly
+                ? "録音停止後に編集できます"
+                : "編集内容は自動保存されます。修正後は「保存してAI要約」";
 }
 
 transcript.addEventListener("input", () => {
@@ -822,8 +822,17 @@ recordingDate.addEventListener("change", () => {
 restoreDraftFromBrowser().then(refreshAiJobStatuses);
 setInterval(refreshAiJobStatuses, 10000);
 
+// Tauri(WKWebView)では標準のconfirm()が表示されずにfalseを返すため、dialogプラグインを使う。
+function showConfirm(message) {
+    const tauriDialog = window.__TAURI__?.dialog;
+    if (tauriDialog) {
+        return tauriDialog.confirm(message, { kind: "warning" });
+    }
+    return Promise.resolve(confirm(message));
+}
+
 clearDraftButton.addEventListener("click", async () => {
-    const shouldClear = confirm(
+    const shouldClear = await showConfirm(
         "ブラウザ内の全報告会の録音・文字起こし・処理状況をリセットしますか？未保存のデータは失われます。RustFSとesaに保存済みのデータは削除されません。"
     );
 
@@ -1289,7 +1298,7 @@ function startPCMStreaming(stream) {
     );
 
     localInferenceTimer = setInterval(() => {
-        queueLocalWhisperInference().catch(() => {});
+        queueLocalWhisperInference().catch(() => { });
     }, localWhisperChunkMilliseconds);
 
 }
@@ -1524,100 +1533,100 @@ startButton.addEventListener(
 
                     try {
 
-                    const actualMimeType =
-                        mediaRecorder.mimeType ||
-                        mimeType ||
-                        "audio/webm";
+                        const actualMimeType =
+                            mediaRecorder.mimeType ||
+                            mimeType ||
+                            "audio/webm";
 
 
-                    const audioBlob =
-                        new Blob(
-                            audioChunks,
-                            {
-                                type:
-                                    actualMimeType
-                            }
-                        );
+                        const audioBlob =
+                            new Blob(
+                                audioChunks,
+                                {
+                                    type:
+                                        actualMimeType
+                                }
+                            );
 
-                    if (reportSegment.cancelled) {
-                        return;
-                    }
-
-
-                    console.log(
-                        "保存用録音形式:",
-                        actualMimeType
-                    );
+                        if (reportSegment.cancelled) {
+                            return;
+                        }
 
 
-                    console.log(
-                        "録音データサイズ:",
-                        audioBlob.size,
-                        "bytes"
-                    );
-
-                    // アップロードボタンを押すまでブラウザ内に保持する
-                    reportSegment.audioBlob = audioBlob;
-                    reportSegment.audioMimeType = actualMimeType;
-                    reportSegment.audioUploadStatus = "pending";
-                    reportSegment.audioStorageKey = "";
-
-                    const key = getReportKey(
-                        reportSegment.group,
-                        reportSegment.speaker
-                    );
-                    const segments = reportRecords.get(key) || [];
-                    segments.push(reportSegment);
-                    reportRecords.set(key, segments);
-                    await saveDraftToBrowser();
-
-
-                    // ----------------------------------------
-                    // 音声再生
-                    // ----------------------------------------
-
-                    const audio =
-                        document.createElement(
-                            "audio"
+                        console.log(
+                            "保存用録音形式:",
+                            actualMimeType
                         );
 
 
-                    audio.controls = true;
-                    audio.preload = "metadata";
+                        console.log(
+                            "録音データサイズ:",
+                            audioBlob.size,
+                            "bytes"
+                        );
 
-                    audio.src =
-                        await blobToDataURL(
-                            audioBlob
+                        // アップロードボタンを押すまでブラウザ内に保持する
+                        reportSegment.audioBlob = audioBlob;
+                        reportSegment.audioMimeType = actualMimeType;
+                        reportSegment.audioUploadStatus = "pending";
+                        reportSegment.audioStorageKey = "";
+
+                        const key = getReportKey(
+                            reportSegment.group,
+                            reportSegment.speaker
+                        );
+                        const segments = reportRecords.get(key) || [];
+                        segments.push(reportSegment);
+                        reportRecords.set(key, segments);
+                        await saveDraftToBrowser();
+
+
+                        // ----------------------------------------
+                        // 音声再生
+                        // ----------------------------------------
+
+                        const audio =
+                            document.createElement(
+                                "audio"
+                            );
+
+
+                        audio.controls = true;
+                        audio.preload = "metadata";
+
+                        audio.src =
+                            await blobToDataURL(
+                                audioBlob
+                            );
+
+
+                        audioArea.innerHTML =
+                            "";
+
+                        audioArea.appendChild(
+                            audio
                         );
 
 
-                    audioArea.innerHTML =
-                        "";
-
-                    audioArea.appendChild(
-                        audio
-                    );
-
-
-                    if (!isCompletingTranscription) {
-                        currentReportSegment = null;
-                        finalTranscript = "";
-                        renderReportList();
-                        updateTranscriptDisplay();
-                        startButton.disabled = false;
-                        clearDraftButton.disabled = false;
-                        meetingGroup.disabled = false;
-                        recordingDate.disabled = false;
-                        memberButtons.querySelectorAll("button").forEach(button => {
-                            button.disabled = false;
-                        });
-                        updateUploadButtonState();
-                    }
+                        if (!isCompletingTranscription) {
+                            currentReportSegment = null;
+                            finalTranscript = "";
+                            renderReportList();
+                            updateTranscriptDisplay();
+                            startButton.disabled = false;
+                            clearDraftButton.disabled = false;
+                            meetingGroup.disabled = false;
+                            recordingDate.disabled = false;
+                            memberButtons.querySelectorAll("button").forEach(button => {
+                                button.disabled = false;
+                            });
+                            updateUploadButtonState();
+                        }
 
 
-                    console.log(
-                        "録音処理が完了しました"
-                    );
+                        console.log(
+                            "録音処理が完了しました"
+                        );
 
                     } finally {
                         finishMediaRecorderProcessing();

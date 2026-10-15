@@ -2,7 +2,7 @@
   "name": "restless-shadow-92dd",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 53104",
+    "dev": "wrangler dev --port 53104 --inspector-port 53114",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
     "deploy": "wrangler deploy --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"
