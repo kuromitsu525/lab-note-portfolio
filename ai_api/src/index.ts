@@ -116,6 +116,7 @@ async function resolvePresentationEsa(
   const normalizeCategory = (category: unknown) => typeof category === "string"
     ? category.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").toLowerCase()
     : "";
+  const expectedYearParts = normalizeCategory(yearCategory).split("/");
 
   try {
     const rawQuery = query;
@@ -135,6 +136,7 @@ async function resolvePresentationEsa(
       totalPages = Number.isInteger(data.total_pages) && data.total_pages > 0 ? data.total_pages : 1;
       post = posts.find((candidate: any) => {
         const pathParts = normalizeCategory(candidate.category).split("/");
+        if (!expectedYearParts.every((part, index) => pathParts[index] === part)) return false;
         const gradeIndex = pathParts.findIndex(part => part === speakerGrade.toLowerCase() || part.endsWith(`.${speakerGrade.toLowerCase()}`));
         if (gradeIndex < 0 || pathParts[gradeIndex + 1] !== speaker.toLowerCase()) return false;
         return dateCategories.some(([categoryMonth, categoryDay]) => pathParts.some((part, index) =>

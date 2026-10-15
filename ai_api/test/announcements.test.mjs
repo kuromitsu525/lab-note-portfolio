@@ -4,7 +4,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 import worker from "../src/index.ts";
 import { ANNOUNCEMENTS_PROMPT, updateAnnouncementsSection } from "../src/announcements.ts";
-import storageWorker from "../../worker/lab-note-worker/src/index.js";
+import storageWorker from "../../upload_api/src/index.js";
 const realSetTimeout = globalThis.setTimeout;
 
 const original = "# **出席者**\n- kuro\n\n# **連絡事項**\n手書きの連絡\n\n# **出席率**\n100%\n\n# **進捗**\n## **kuro**\n### [進捗]\n以前の内容\n<br>\n";
@@ -12,7 +12,7 @@ const summary = "- **論文添削への協力**\n  - 先輩の論文を読み、
 const startMarker = "<!-- lab-note:announcements:start -->";
 
 test("すべての報告会の末尾に連絡事項があり、表示名と保存用IDを区別する", () => {
-  const source = readFileSync(new URL("../../script.js", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../app/front/script.js", import.meta.url), "utf8");
   const config = source.slice(source.indexOf("const meetingGroups ="), source.indexOf("const workerBaseURL ="));
   const result = runInNewContext(`${config}; JSON.stringify({meetingGroups, label: getSpeakerLabel("announcements"), student: getSpeakerLabel("kuro")})`);
   const { meetingGroups, label, student } = JSON.parse(result);
@@ -126,7 +126,7 @@ for (const speaker of ["announcements", "kuro"]) {
       assert.equal(patch.message, "連絡事項をAIで更新");
     } else {
       assert.notEqual(aiInput.messages[0].content, ANNOUNCEMENTS_PROMPT);
-      assert.ok(aiInput.messages[0].content.includes("対象話者のMarkdownブロック"));
+      assert.ok(aiInput.messages[0].content.includes("個人発表用esa記事"));
       assert.ok(!patch.body_md.includes(startMarker));
     }
   });

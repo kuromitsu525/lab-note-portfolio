@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 
-const source = readFileSync(new URL("../../script.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../app/front/script.js", import.meta.url), "utf8");
 
 function setup(speaker = "kuro") {
   const listeners = {};
