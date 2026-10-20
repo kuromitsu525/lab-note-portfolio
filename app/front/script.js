@@ -15,6 +15,7 @@ const meetingGroup = document.getElementById("meetingGroup");
 const memberButtons = document.getElementById("memberButtons");
 const reportList = document.getElementById("reportList");
 const clearDraftButton = document.getElementById("clearDraftButton");
+const presentationEsaUrlInput = document.getElementById("presentationEsaUrl");
 
 
 // ============================================================
@@ -45,9 +46,8 @@ const rustFsGroupNames = {
     "LBS班": "lbs"
 };
 
-const workerBaseURL = `http://${location.hostname || "127.0.0.1"}:53103`;
-const aiWorkerBaseURL = `http://${location.hostname || "127.0.0.1"}:53104`;
-
+const workerBaseURL = "https://upload-api.labnote.kajilab.dev";
+const aiWorkerBaseURL = "https://ai-api.labnote.kajilab.dev";
 // 録音停止後、議事録生成まで一時的に保持するデータ
 const reportRecords = new Map();
 
@@ -210,6 +210,40 @@ let isUploadingReport = false;
 
 let timerInterval = null;
 let elapsedSeconds = 0;
+
+function updateRecordingTimerDisplay() {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    timer.textContent =
+        `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function stopRecordingTimer() {
+    if (timerInterval !== null) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function resetRecordingTimer() {
+    stopRecordingTimer();
+    elapsedSeconds = 0;
+    updateRecordingTimerDisplay();
+}
+
+function startRecordingTimer() {
+    resetRecordingTimer();
+    timerInterval = setInterval(() => {
+        // MediaRecorderが録音中でない場合は、表示だけが進み続けないように停止する。
+        if (!isRecording || mediaRecorder?.state !== "recording") {
+            stopRecordingTimer();
+            return;
+        }
+
+        elapsedSeconds++;
+        updateRecordingTimerDisplay();
+    }, 1000);
+}
 
 
 // ============================================================
@@ -682,6 +716,23 @@ function renderReportList() {
                     status.target = "_blank";
                     status.rel = "noopener noreferrer";
                     status.title = "esaの記事を新しいタブで開く";
+                    status.addEventListener("click", async event => {
+                        const openUrl = window.__TAURI__?.opener?.openUrl;
+
+                        // 通常のブラウザでは、従来どおりtarget="_blank"で開く。
+                        if (typeof openUrl !== "function") {
+                            return;
+                        }
+
+                        // TauriのWebViewでは通常のリンク遷移を止め、既定ブラウザで開く。
+                        event.preventDefault();
+                        try {
+                            await openUrl(parsedUrl.toString());
+                        } catch (error) {
+                            console.error("esaの記事を開けませんでした:", error);
+                            alert("esaの記事をブラウザで開けませんでした。");
+                        }
+                    });
                 }
             } catch {
                 // URLが不正な場合は通常のステータス表示にする
@@ -849,12 +900,12 @@ clearDraftButton.addEventListener("click", async () => {
         activeSpeaker = "";
         currentReportSegment = null;
         finalTranscript = "";
+        isRecording = false;
+        resetRecordingTimer();
 
         meetingGroup.value = "";
         recordingDate.value = getJapanDateString();
         transcript.value = "";
-        timer.textContent = "00:00";
-        elapsedSeconds = 0;
         audioArea.innerHTML = "";
 
         renderMemberButtons();
@@ -1400,6 +1451,9 @@ startButton.addEventListener(
                 return;
             }
 
+            // 前回のタイマーが異常終了などで残っていても、録音開始前に必ず解除する。
+            resetRecordingTimer();
+
             const reportGroup = meetingGroup.value;
             const reportSpeaker = activeSpeaker;
 
@@ -1532,6 +1586,10 @@ startButton.addEventListener(
                 async () => {
 
                     try {
+
+                        // Stopボタン以外の理由でMediaRecorderが停止した場合もタイマーを止める。
+                        isRecording = false;
+                        stopRecordingTimer();
 
                         const actualMimeType =
                             mediaRecorder.mimeType ||
@@ -1700,49 +1758,7 @@ startButton.addEventListener(
             // タイマー
             // ------------------------------------------------
 
-            elapsedSeconds = 0;
-
-            timer.textContent =
-                "00:00";
-
-
-            timerInterval =
-                setInterval(
-                    () => {
-
-                        elapsedSeconds++;
-
-
-                        const minutes =
-                            Math.floor(
-                                elapsedSeconds /
-                                60
-                            );
-
-
-                        const seconds =
-                            elapsedSeconds %
-                            60;
-
-
-                        timer.textContent =
-                            String(
-                                minutes
-                            ).padStart(
-                                2,
-                                "0"
-                            ) +
-                            ":" +
-                            String(
-                                seconds
-                            ).padStart(
-                                2,
-                                "0"
-                            );
-
-                    },
-                    1000
-                );
+            startRecordingTimer();
 
 
             console.log(
@@ -1756,6 +1772,8 @@ startButton.addEventListener(
                 error
             );
 
+            isRecording = false;
+            stopRecordingTimer();
 
             stopPCMStreaming();
 
@@ -1829,13 +1847,7 @@ stopButton.addEventListener(
         // タイマー停止
         // ------------------------------------------------
 
-        clearInterval(
-            timerInterval
-        );
-
-
-        timerInterval =
-            null;
+        stopRecordingTimer();
 
 
         // ------------------------------------------------
@@ -2049,14 +2061,13 @@ uploadButton.addEventListener("click", async () => {
                 const firstSegment = [...segments]
                     .sort((a, b) => a.startedAt.localeCompare(b.startedAt))[0];
 
+                const submittedPresentationEsaUrl = presentationEsaUrlInput?.value.trim() || "";
                 const queueResult = await enqueueMinutesGeneration({
                     templateKey: rustFsGroupNames[group],
                     speaker,
                     meetingDate: firstSegment.meetingDate || getJapanDateString(firstSegment.startedAt),
                     transcriptUrl: readTarget.url,
-                    presentationEsaUrl: typeof document !== "undefined"
-                        ? document.getElementById("presentationEsaUrl")?.value.trim() || ""
-                        : ""
+                    presentationEsaUrl: submittedPresentationEsaUrl
                 });
 
                 const queuedAt = new Date().toISOString();
@@ -2070,6 +2081,15 @@ uploadButton.addEventListener("click", async () => {
                     segment.aiEnqueueStatus = "sent";
                     segment.aiStage = "";
                 });
+
+                // URLを使ったAI処理の登録に成功したら、次の報告者用に入力欄を空にする。
+                // 送信中に別のURLへ書き換えられていた場合は、新しい入力を残す。
+                if (
+                    submittedPresentationEsaUrl &&
+                    presentationEsaUrlInput?.value.trim() === submittedPresentationEsaUrl
+                ) {
+                    presentationEsaUrlInput.value = "";
+                }
             } catch (error) {
                 segments.forEach(segment => {
                     segment.aiQueueStatus = "failed";
