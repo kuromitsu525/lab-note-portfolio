@@ -35,6 +35,25 @@ jobs:
       - name: モデルを取得してSHA-256を確認
         run: mise run setup:model
 
+      # whisper.cppのCMakeビルドをccacheでキャッシュする
+      # checkoutでソースのmtimeが更新されるため、ビルドディレクトリではなくコンパイル結果をキャッシュする
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: whisper-cpp-${{ runner.os }}-${{ runner.arch }}
+          max-size: 500M
+
+      - name: pnpm storeのパスを取得
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: pnpm storeをキャッシュ
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+
       - name: 依存関係をインストール
         run: pnpm install --frozen-lockfile
 
@@ -88,6 +107,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # beforeBuildCommandのcmakeにccacheを使わせる
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         with:
           projectPath: app
           tauriScript: pnpm tauri
