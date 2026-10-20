@@ -35,7 +35,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
     },
     "externalBin": [
       "../whisper.cpp/build-tauri/bin/whisper-server"

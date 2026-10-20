@@ -1794,11 +1794,29 @@ startButton.addEventListener(
             }
 
 
-            alert(
-                "ローカル文字起こしサーバーへ接続できませんでした。" +
-                "\n先に ./start-local-whisper.sh を起動してください。" +
-                `\n詳細: ${error instanceof Error ? error.message : String(error)}`
-            );
+            const errorDetail =
+                error instanceof Error ? error.message : String(error);
+
+            if (
+                error instanceof DOMException &&
+                error.name === "NotAllowedError"
+            ) {
+
+                alert(
+                    "マイクへのアクセスが許可されていません。" +
+                    "\n「システム設定 → プライバシーとセキュリティ → マイク」で lab-note を許可してください。" +
+                    `\n詳細: ${errorDetail}`
+                );
+
+            } else {
+
+                alert(
+                    "ローカル文字起こしサーバーへ接続できませんでした。" +
+                    "\n先に ./start-local-whisper.sh を起動してください。" +
+                    `\n詳細: ${errorDetail}`
+                );
+
+            }
 
 
             startButton.disabled =
