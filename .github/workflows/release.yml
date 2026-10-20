@@ -104,9 +104,25 @@ jobs:
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # 公証に使うApp Store Connect APIキー(.p8)をファイルに書き出す
+      - name: 公証用APIキーを用意
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Developer ID証明書で署名する
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # App Store Connect APIキーで公証する
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           # beforeBuildCommandのcmakeにccacheを使わせる
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -122,19 +138,6 @@ jobs:
 
             1. 下の Assets から `.dmg` をダウンロードして開き、`lab-note.app` を「アプリケーション」にドラッグします。
             2. `lab-note.app` を開きます。
-
-            ## 開けないとき
-
-            Apple Developer の署名・公証をしていないため、初回は警告が表示されます。
-
-            - **「開発元を検証できません」と表示された場合**
-              「システム設定 → プライバシーとセキュリティ」の下部にある「このまま開く」を押してください。
-            - **「壊れているため開けません」と表示された場合**
-              ゴミ箱には入れずに「キャンセル」を押し、ターミナルで次を実行してから開き直してください。
-
-              ```bash
-              xattr -cr /Applications/lab-note.app
-              ```
           releaseDraft: false
           prerelease: false
           # モデルを含み大きいため、.app.tar.gzは作らずdmgのみにする
