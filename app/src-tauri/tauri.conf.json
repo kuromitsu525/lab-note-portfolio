@@ -34,6 +34,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "externalBin": [
       "../whisper.cpp/build-tauri/bin/whisper-server"
     ],

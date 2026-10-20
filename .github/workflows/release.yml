@@ -95,7 +95,24 @@ jobs:
           releaseCommitish: ${{ steps.bump.outputs.sha }}
           tagName: v__VERSION__
           releaseName: Lab Note v__VERSION__
-          releaseBody: '`.dmg` をダウンロードしてインストールしてください。'
+          releaseBody: |
+            ## インストール（macOS Apple Silicon）
+
+            1. 下の Assets から `.dmg` をダウンロードして開き、`lab-note.app` を「アプリケーション」にドラッグします。
+            2. `lab-note.app` を開きます。
+
+            ## 開けないとき
+
+            Apple Developer の署名・公証をしていないため、初回は警告が表示されます。
+
+            - **「開発元を検証できません」と表示された場合**
+              「システム設定 → プライバシーとセキュリティ」の下部にある「このまま開く」を押してください。
+            - **「壊れているため開けません」と表示された場合**
+              ゴミ箱には入れずに「キャンセル」を押し、ターミナルで次を実行してから開き直してください。
+
+              ```bash
+              xattr -cr /Applications/lab-note.app
+              ```
           releaseDraft: false
           prerelease: false
           # モデルを含み大きいため、.app.tar.gzは作らずdmgのみにする

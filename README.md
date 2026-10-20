@@ -12,7 +12,9 @@ pnpmワークスペースのモノレポです。
 
 `main` にマージされるたびに GitHub Actions がアプリをビルドし、[Releases](https://github.com/kajiLabTeam/LabNote/releases/latest) に `.dmg` を公開します。
 バージョンはマージごとにパッチ番号（`0.1.0` → `0.1.1`）が自動で上がり、CIが `chore: v0.1.1 をリリース` のコミットを `main` にpushします。メジャー・マイナーを上げるときは `app/src-tauri/tauri.conf.json` の `version` を `0.2.0` のように書き換えてマージしてください。
-署名していないため、初回起動で「壊れている」と表示された場合は次を実行してください。
+Apple Developerの署名・公証をしていないため、初回は「開発元を検証できません」と表示されます。
+「システム設定 → プライバシーとセキュリティ」の下部にある「このまま開く」を押してください。
+それでも開けない場合や「壊れている」と表示された場合は、次を実行してください。
 
 ```bash
 xattr -cr /Applications/lab-note.app
