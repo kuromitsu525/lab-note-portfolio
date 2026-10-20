@@ -15,19 +15,19 @@ jobs:
       contents: write
     runs-on: macos-latest # Apple Silicon (arm64)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
       # Node.js・pnpm・Rust・CMakeを mise.toml のバージョンで入れる
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v5
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: './app/src-tauri -> target'
 
       - name: Kotoba-Whisperモデルをキャッシュ
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: app/whisper.cpp/models/ggml-kotoba-whisper-v2.0-q5_0.bin
           key: kotoba-whisper-v2.0-q5_0-4a3b92192b5d3578
@@ -37,7 +37,7 @@ jobs:
 
       # whisper.cppのCMakeビルドをccacheでキャッシュする
       # checkoutでソースのmtimeが更新されるため、ビルドディレクトリではなくコンパイル結果をキャッシュする
-      - uses: hendrikmuhs/ccache-action@v1.2
+      - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: whisper-cpp-${{ runner.os }}-${{ runner.arch }}
           max-size: 500M
@@ -47,7 +47,7 @@ jobs:
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: pnpm storeをキャッシュ
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
