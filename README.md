@@ -8,6 +8,16 @@ pnpmワークスペースのモノレポです。
 | `upload_api` | RustFS署名用Worker | 53103 |
 | `ai_api` | AI要約・esa反映用Worker | 53104 |
 
+## ダウンロード（macOS Apple Silicon）
+
+`main` にマージされるたびに GitHub Actions がアプリをビルドし、[Releases](https://github.com/kajiLabTeam/LabNote/releases/latest) に `.dmg` を公開します。
+バージョンはマージごとにパッチ番号（`0.1.0` → `0.1.1`）が自動で上がり、CIが `chore: v0.1.1 をリリース` のコミットを `main` にpushします。メジャー・マイナーを上げるときは `app/src-tauri/tauri.conf.json` の `version` を `0.2.0` のように書き換えてマージしてください。
+署名していないため、初回起動で「壊れている」と表示された場合は次を実行してください。
+
+```bash
+xattr -cr /Applications/lab-note.app
+```
+
 ## セットアップ
 
 [mise](https://mise.jdx.dev/)・`git`・`curl` を用意し、ルートで実行します。
