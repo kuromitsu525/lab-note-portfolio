@@ -10,7 +10,10 @@
     "dev:api": "pnpm --filter ./ai_api --filter ./upload_api --parallel dev",
     "test": "pnpm -r test",
     "deploy:ai": "pnpm --filter ./ai_api run deploy",
-    "deploy:upload": "pnpm --filter ./upload_api run deploy"
+    "deploy:upload": "pnpm --filter ./upload_api run deploy",
+    "version:patch": "node scripts/bump-version.mjs patch",
+    "version:minor": "node scripts/bump-version.mjs minor",
+    "version:major": "node scripts/bump-version.mjs major"
   },
   "devDependencies": {
     "wrangler": "4.147.0"
