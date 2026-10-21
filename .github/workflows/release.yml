@@ -1,45 +1,16 @@
 name: Release
 
+# pnpm release:* でmainの最新コミットにvX.Y.Zタグをpushするとリリースする
 on:
   push:
-    branches: [main]
-    paths:
-      - app/src-tauri/tauri.conf.json
-  workflow_dispatch:
+    tags: ['v*.*.*']
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  # tauri.conf.jsonのバージョンのリリースがまだなければリリースする
-  # (バージョン以外の変更でtauri.conf.jsonが更新された場合はスキップする)
-  check-version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      release: ${{ steps.version.outputs.release }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: バージョンを確認
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          version=$(jq -r .version app/src-tauri/tauri.conf.json)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "v$version はリリース済みのためスキップします"
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "v$version をリリースします"
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          fi
-
   publish-tauri:
-    needs: check-version
-    if: needs.check-version.outputs.release == 'true'
     permissions:
       contents: write
     runs-on: macos-latest # Apple Silicon (arm64)
@@ -86,6 +57,10 @@ jobs:
       - name: 依存関係をインストール
         run: pnpm install --frozen-lockfile
 
+      # タグのバージョンをビルドに反映する(リポジトリにはコミットしない)
+      - name: タグのバージョンを反映
+        run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+
       # 公証に使うApp Store Connect APIキー(.p8)をファイルに書き出す
       - name: 公証用APIキーを用意
         env:
@@ -111,8 +86,8 @@ jobs:
         with:
           projectPath: app
           tauriScript: pnpm tauri
-          releaseCommitish: ${{ github.sha }}
-          tagName: v__VERSION__
+          # pushされたタグにリリースを作る
+          tagName: ${{ github.ref_name }}
           releaseName: Lab Note v__VERSION__
           releaseBody: |
             ## インストール（macOS Apple Silicon）
