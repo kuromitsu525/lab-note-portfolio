@@ -59,7 +59,7 @@ jobs:
 
       # タグのバージョンをビルドに反映する(リポジトリにはコミットしない)
       - name: タグのバージョンを反映
-        run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+        run: scripts/set-version.sh "${GITHUB_REF_NAME#v}"
 
       # 公証に使うApp Store Connect APIキー(.p8)をファイルに書き出す
       - name: 公証用APIキーを用意

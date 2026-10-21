@@ -11,9 +11,9 @@
     "test": "pnpm -r test",
     "deploy:ai": "pnpm --filter ./ai_api run deploy",
     "deploy:upload": "pnpm --filter ./upload_api run deploy",
-    "release:patch": "node scripts/release.mjs patch",
-    "release:minor": "node scripts/release.mjs minor",
-    "release:major": "node scripts/release.mjs major"
+    "release:patch": "scripts/release.sh patch",
+    "release:minor": "scripts/release.sh minor",
+    "release:major": "scripts/release.sh major"
   },
   "devDependencies": {
     "wrangler": "4.147.0"
