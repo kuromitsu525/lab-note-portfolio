@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Lab Note L icon">
+  <rect x="32" y="32" width="960" height="960" rx="240" fill="#087f8c"/>
+  <text
+    x="512"
+    y="735"
+    fill="#ffffff"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="680"
+    font-weight="400"
+    text-anchor="middle"
+  >L</text>
+</svg>
