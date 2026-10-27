@@ -31,6 +31,33 @@ mise run setup  # submodule取得、モデルのダウンロードとSHA-256確�
 
 作成された `upload_api/.dev.vars` と `ai_api/.dev.vars` に実際の値を設定してください（コミットしないこと）。
 
+## Cloudflare AccessによるAPI保護
+
+デプロイ済みの次の2つのAPIは、Cloudflare AccessのService Tokenで保護します。
+
+- `https://upload-api.labnote.kajilab.dev`
+- `https://ai-api.labnote.kajilab.dev`
+
+Cloudflare Zero Trustで両方のホスト名をSelf-hosted Applicationの対象にし、ポリシーを
+`Service Auth`、Include条件を対象のService Tokenに設定してください。ブラウザのCORS
+プリフライトをWorkerへ通すため、ApplicationのCORS設定ではOPTIONSリクエストをoriginへ
+bypassします。Worker側では利用可能なTauri originとAccess用ヘッダーだけを許可しています。
+
+CORS対応を含むWorkerを先にデプロイします。
+
+```bash
+pnpm deploy:upload
+pnpm deploy:ai
+```
+
+その後、Lab Note右上の歯車を開き、Service TokenのClient IDとClient Secretを入力して
+「保存」→「接続確認」を実行します。設定済みなら歯車の点が緑、未設定なら赤になります。
+Secretはソースコード、`.dev.vars`、IndexedDBには保存せず、macOSのキーチェーンまたは
+Windowsの資格情報マネージャーへ保存します。アプリを配布する際もIDとSecretを埋め込まないでください。
+
+Service Tokenはこの2つのApplicationだけに限定し、有効期限を設定して定期的に交換してください。
+漏えいまたは端末紛失時はCloudflare側で直ちに失効させ、アプリの設定も削除します。
+
 ## 起動とテスト
 
 | コマンド | 内容 |
@@ -69,7 +96,7 @@ RustFSでは、他の報告者と同じ日付フォルダに
 `announcements_audio_01.webm`、`announcements_transcript_01.txt` のように保存します。
 音声の拡張子はブラウザにより異なり、ファイル番号は既存ファイルに応じて増えます。
 
-連絡事項には専用プロンプト（`workers-ai-test/src/announcements.ts`）を使います。
+連絡事項には専用プロンプト（`ai_api/src/announcements.ts`）を使います。
 学生の進捗報告と自動で分類する仕組みではないため、録音前に対象を選んでください。
 要約はesaの既存の「連絡事項」欄に反映し、学生の欄には入れません。
 AI生成部分は `<!-- lab-note:announcements:start -->` と
@@ -80,7 +107,7 @@ esa上で手書きの内容を残したい場合は、この目印の外に記�
 Node.js 24で、外部通信・AI利用・esa投稿を行わずにテストできます。
 
 ```bash
-npm --prefix workers-ai-test test
+pnpm --filter ./ai_api test
 ```
 
 ## 新しいメンバーを追加する場合
@@ -90,8 +117,8 @@ npm --prefix workers-ai-test test
 
 | 変更する場所 | 追加する内容 | 役割 |
 | --- | --- | --- |
-| `script.js` の `meetingGroups` | 該当する報告会の配列に名前を追加 | 名前ボタンと報告状況に表示する |
-| `workers-ai-test/src/index.ts` の `SPEAKERS` | 同じ報告会の配列に同じ名前を追加 | そのメンバーのAI処理を受け付ける |
+| `app/front/script.js` の `meetingGroups` | 該当する報告会の配列に名前を追加 | 名前ボタンと報告状況に表示する |
+| `ai_api/src/index.ts` の `SPEAKERS` | 同じ報告会の配列に同じ名前を追加 | そのメンバーのAI処理を受け付ける |
 | 同ファイルの `TEMPLATES` | 該当するテンプレートの出席者一覧と個人の進捗報告欄を追加 | 新規esa記事に本人の欄を用意する |
 
 画面側の報告会名とWorker側のキーは、`3年セミナー` → `seminar3`、
@@ -155,8 +182,8 @@ esaの個人進捗報告に、その年度のカテゴリを作成し、各記�
 
 | ファイル・定義 | 更新内容 |
 | --- | --- |
-| `script.js` の `meetingGroups` | 画面に表示する会議ごとのメンバーを更新 |
-| `workers-ai-test/src/index.ts` の `SPEAKERS` | 各会議で受け付ける話者を更新 |
+| `app/front/script.js` の `meetingGroups` | 画面に表示する会議ごとのメンバーを更新 |
+| `ai_api/src/index.ts` の `SPEAKERS` | 各会議で受け付ける話者を更新 |
 | 同ファイルの `TEMPLATES` | 出席者リストの学年区分と個人進捗欄を更新 |
 | 同ファイルの `SPEAKER_GRADES` | 各話者IDを `B3` / `B4` / `M1` / `M2` に対応づける |
 
@@ -180,8 +207,7 @@ esaの個人進捗報告に、その年度のカテゴリを作成し、各記�
 変更後はAI・esa用Workerを起動しているターミナルで `Ctrl+C` を押して停止し、次のように再起動します。
 
 ```bash
-cd workers-ai-test
-npm run dev
+pnpm dev:ai
 ```
 
 その後、Web画面を再読み込みしてください。既存のesa議事録の出席者欄や個人欄は自動更新されないため、

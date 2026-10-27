@@ -19,7 +19,7 @@ const allowedTranscriptKeyPatterns = [
 function corsHeaders(request) {
     const headers = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret",
         "Vary": "Origin"
     };
 

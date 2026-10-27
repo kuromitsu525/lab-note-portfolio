@@ -16,6 +16,16 @@ const memberButtons = document.getElementById("memberButtons");
 const reportList = document.getElementById("reportList");
 const clearDraftButton = document.getElementById("clearDraftButton");
 const presentationEsaUrlInput = document.getElementById("presentationEsaUrl");
+const settingsButton = document.getElementById("settingsButton");
+const settingsDialog = document.getElementById("settingsDialog");
+const settingsForm = document.getElementById("settingsForm");
+const closeSettingsButton = document.getElementById("closeSettingsButton");
+const cloudflareAccessClientIdInput = document.getElementById("cloudflareAccessClientId");
+const cloudflareAccessClientSecretInput = document.getElementById("cloudflareAccessClientSecret");
+const settingsMessage = document.getElementById("settingsMessage");
+const deleteSettingsButton = document.getElementById("deleteSettingsButton");
+const testSettingsButton = document.getElementById("testSettingsButton");
+const saveSettingsButton = document.getElementById("saveSettingsButton");
 
 
 // ============================================================
@@ -48,6 +58,191 @@ const rustFsGroupNames = {
 
 const workerBaseURL = "https://upload-api.labnote.kajilab.dev";
 const aiWorkerBaseURL = "https://ai-api.labnote.kajilab.dev";
+const protectedApiOrigins = new Set([
+    new URL(workerBaseURL).origin,
+    new URL(aiWorkerBaseURL).origin
+]);
+let cloudflareAccessCredentials = null;
+
+function setSettingsMessage(message, isError = false) {
+    settingsMessage.textContent = message;
+    settingsMessage.classList.toggle("error", isError);
+}
+
+function updateSettingsState() {
+    const configured = Boolean(
+        cloudflareAccessCredentials?.clientId &&
+        cloudflareAccessCredentials?.clientSecret
+    );
+    settingsButton.classList.toggle("configured", configured);
+    settingsButton.title = configured
+        ? "Cloudflare Access設定済み"
+        : "Cloudflare Accessが未設定です";
+    settingsButton.setAttribute(
+        "aria-label",
+        configured
+            ? "Cloudflare Access設定を開く（設定済み）"
+            : "Cloudflare Access設定を開く（未設定）"
+    );
+}
+
+function getCredentialsFromSettingsForm() {
+    return {
+        clientId: cloudflareAccessClientIdInput.value.trim(),
+        clientSecret: cloudflareAccessClientSecretInput.value.trim()
+    };
+}
+
+function validateCloudflareAccessCredentials(credentials) {
+    if (!credentials?.clientId || !credentials?.clientSecret) {
+        throw new Error("Client IDとClient Secretの両方を入力してください。");
+    }
+}
+
+function getTauriInvoke() {
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (typeof invoke !== "function") {
+        throw new Error("資格情報の保存はTauriアプリ版でのみ利用できます。");
+    }
+    return invoke;
+}
+
+async function loadCloudflareAccessCredentials() {
+    try {
+        const credentials = await getTauriInvoke()("load_cloudflare_access_credentials");
+        if (credentials?.clientId && credentials?.clientSecret) {
+            cloudflareAccessCredentials = credentials;
+        }
+    } catch (error) {
+        console.error("Cloudflare Access設定を読み込めませんでした:", error);
+    } finally {
+        updateSettingsState();
+    }
+}
+
+function openSettingsDialog(message = "") {
+    cloudflareAccessClientIdInput.value = cloudflareAccessCredentials?.clientId || "";
+    cloudflareAccessClientSecretInput.value = cloudflareAccessCredentials?.clientSecret || "";
+    setSettingsMessage(message);
+    if (!settingsDialog.open) {
+        settingsDialog.showModal();
+    }
+    cloudflareAccessClientIdInput.focus();
+}
+
+async function fetchProtectedApi(url, options = {}, credentials = cloudflareAccessCredentials) {
+    validateCloudflareAccessCredentials(credentials);
+
+    const targetUrl = new URL(url);
+    if (!protectedApiOrigins.has(targetUrl.origin)) {
+        throw new Error("Cloudflare Accessトークンを送信できない接続先です。");
+    }
+
+    const headers = new Headers(options.headers || {});
+    headers.set("CF-Access-Client-Id", credentials.clientId);
+    headers.set("CF-Access-Client-Secret", credentials.clientSecret);
+    return fetch(targetUrl.toString(), { ...options, headers });
+}
+
+async function testCloudflareAccessCredentials(credentials) {
+    validateCloudflareAccessCredentials(credentials);
+
+    const uploadResponse = await fetchProtectedApi(
+        `${workerBaseURL}/`,
+        { cache: "no-store" },
+        credentials
+    );
+    if (!uploadResponse.ok) {
+        throw new Error(`アップロードAPIの認証に失敗しました（HTTP ${uploadResponse.status}）。`);
+    }
+
+    // 存在しない処理IDへの404は、Accessを通過してAI APIまで到達できたことを示す。
+    const aiResponse = await fetchProtectedApi(
+        `${aiWorkerBaseURL}/api/status/lab-note-access-check`,
+        { cache: "no-store" },
+        credentials
+    );
+    if (aiResponse.status !== 404 && !aiResponse.ok) {
+        throw new Error(`AI APIの認証に失敗しました（HTTP ${aiResponse.status}）。`);
+    }
+}
+
+function setSettingsButtonsDisabled(disabled) {
+    deleteSettingsButton.disabled = disabled;
+    testSettingsButton.disabled = disabled;
+    saveSettingsButton.disabled = disabled;
+}
+
+settingsButton.addEventListener("click", () => openSettingsDialog());
+closeSettingsButton.addEventListener("click", () => settingsDialog.close());
+settingsDialog.addEventListener("click", event => {
+    if (event.target === settingsDialog) {
+        settingsDialog.close();
+    }
+});
+
+settingsForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    const credentials = getCredentialsFromSettingsForm();
+    setSettingsButtonsDisabled(true);
+    setSettingsMessage("設定を保存しています…");
+
+    try {
+        validateCloudflareAccessCredentials(credentials);
+        await getTauriInvoke()("save_cloudflare_access_credentials", { credentials });
+        cloudflareAccessCredentials = credentials;
+        updateSettingsState();
+        setSettingsMessage("設定を安全に保存しました。");
+        refreshAiJobStatuses();
+    } catch (error) {
+        setSettingsMessage(error instanceof Error ? error.message : String(error), true);
+    } finally {
+        setSettingsButtonsDisabled(false);
+    }
+});
+
+testSettingsButton.addEventListener("click", async () => {
+    const credentials = getCredentialsFromSettingsForm();
+    setSettingsButtonsDisabled(true);
+    setSettingsMessage("2つのAPIへの接続を確認しています…");
+
+    try {
+        await testCloudflareAccessCredentials(credentials);
+        setSettingsMessage("アップロードAPI・AI APIの両方に接続できました。");
+    } catch (error) {
+        console.error("Cloudflare Accessの接続確認に失敗しました:", error);
+        setSettingsMessage(
+            error instanceof TypeError
+                ? "接続できませんでした。AccessポリシーとCORSのOPTIONS設定を確認してください。"
+                : error instanceof Error ? error.message : String(error),
+            true
+        );
+    } finally {
+        setSettingsButtonsDisabled(false);
+    }
+});
+
+deleteSettingsButton.addEventListener("click", async () => {
+    const shouldDelete = await showConfirm("この端末に保存したCloudflare Access設定を削除しますか？");
+    if (!shouldDelete) {
+        return;
+    }
+
+    setSettingsButtonsDisabled(true);
+    try {
+        await getTauriInvoke()("delete_cloudflare_access_credentials");
+        cloudflareAccessCredentials = null;
+        cloudflareAccessClientIdInput.value = "";
+        cloudflareAccessClientSecretInput.value = "";
+        updateSettingsState();
+        setSettingsMessage("この端末から設定を削除しました。");
+    } catch (error) {
+        setSettingsMessage(error instanceof Error ? error.message : String(error), true);
+    } finally {
+        setSettingsButtonsDisabled(false);
+    }
+});
+
 // 録音停止後、議事録生成まで一時的に保持するデータ
 const reportRecords = new Map();
 
@@ -467,7 +662,7 @@ function getRustFsDateFolderPath(date) {
 }
 
 async function requestRustFsSignedUrl(payload) {
-    const response = await fetch(`${workerBaseURL}/api/rustfs/presign`, {
+    const response = await fetchProtectedApi(`${workerBaseURL}/api/rustfs/presign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -482,7 +677,7 @@ async function requestRustFsSignedUrl(payload) {
 }
 
 async function enqueueMinutesGeneration(payload) {
-    const response = await fetch(`${aiWorkerBaseURL}/api/enqueue`, {
+    const response = await fetchProtectedApi(`${aiWorkerBaseURL}/api/enqueue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -517,7 +712,7 @@ function updateAiJobFields(jobId, fields) {
 }
 
 async function refreshAiJobStatuses() {
-    if (isPollingAiStatuses) {
+    if (isPollingAiStatuses || !cloudflareAccessCredentials) {
         return;
     }
 
@@ -544,7 +739,7 @@ async function refreshAiJobStatuses() {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), aiStatusRequestTimeoutMilliseconds);
             try {
-                const response = await fetch(
+                const response = await fetchProtectedApi(
                     `${aiWorkerBaseURL}/api/status/${encodeURIComponent(jobId)}`,
                     { cache: "no-store", signal: controller.signal }
                 );
@@ -870,7 +1065,9 @@ recordingDate.addEventListener("change", () => {
 
     saveDraftToBrowser();
 });
-restoreDraftFromBrowser().then(refreshAiJobStatuses);
+loadCloudflareAccessCredentials()
+    .then(restoreDraftFromBrowser)
+    .then(refreshAiJobStatuses);
 setInterval(refreshAiJobStatuses, 10000);
 
 // Tauri(WKWebView)では標準のconfirm()が表示されずにfalseを返すため、dialogプラグインを使う。
@@ -1952,6 +2149,11 @@ stopButton.addEventListener(
 // ============================================================
 
 uploadButton.addEventListener("click", async () => {
+    if (!cloudflareAccessCredentials) {
+        openSettingsDialog("保存とAI要約を行うには、先にService Tokenを設定してください。");
+        return;
+    }
+
     const group = meetingGroup.value;
     const speaker = activeSpeaker;
     const segments = getSpeakerSegments(group, speaker);
