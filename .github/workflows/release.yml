@@ -1,9 +1,9 @@
 name: Release
 
+# pnpm release:* でmainの最新コミットにvX.Y.Zタグをpushするとリリースする
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    tags: ['v*.*.*']
 
 concurrency:
   group: release
@@ -57,52 +57,9 @@ jobs:
       - name: 依存関係をインストール
         run: pnpm install --frozen-lockfile
 
-      # tauri.conf.jsonのメジャー・マイナーを基準に、最新リリースからパッチを1つ上げる
-      # 例: 基準0.1・最新v0.1.4 → 0.1.5 / 基準0.2・最新v0.1.4 → 0.2.0
-      - name: バージョンを決める
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          base=$(node -p "require('./app/src-tauri/tauri.conf.json').version.split('.').slice(0, 2).join('.')")
-          latest=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
-          latest=${latest#v}
-          if [ "${latest%.*}" = "$base" ]; then
-            version="$base.$(( ${latest##*.} + 1 ))"
-          else
-            version="$base.0"
-          fi
-          echo "version: $version (latest: ${latest:-なし})"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      # tauri.conf.json・package.json・Cargo.toml・Cargo.lockを書き換えてmainにpushする
-      # GITHUB_TOKENによるpushではワークフローが再実行されないため、ループしない
-      - name: バージョンをリポジトリに反映
-        id: bump
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            for (const file of ["app/src-tauri/tauri.conf.json", "app/package.json"]) {
-              const json = JSON.parse(fs.readFileSync(file, "utf8"));
-              json.version = process.env.VERSION;
-              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
-            }
-          '
-          perl -0pi -e 's/^version = ".*?"/version = "$ENV{VERSION}"/m' app/src-tauri/Cargo.toml
-          perl -0pi -e 's/(name = "lab-note"\nversion = )".*?"/$1"$ENV{VERSION}"/' app/src-tauri/Cargo.lock
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src-tauri/tauri.conf.json app/package.json app/src-tauri/Cargo.toml app/src-tauri/Cargo.lock
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: v$VERSION をリリース"
-            # ビルド開始後にmainが進んでいた場合に備えてrebaseしてからpushする
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # タグのバージョンをビルドに反映する(リポジトリにはコミットしない)
+      - name: タグのバージョンを反映
+        run: scripts/set-version.sh "${GITHUB_REF_NAME#v}"
 
       # 公証に使うApp Store Connect APIキー(.p8)をファイルに書き出す
       - name: 公証用APIキーを用意
@@ -129,9 +86,8 @@ jobs:
         with:
           projectPath: app
           tauriScript: pnpm tauri
-          # バージョンを書き換えたコミットにタグを付ける
-          releaseCommitish: ${{ steps.bump.outputs.sha }}
-          tagName: v__VERSION__
+          # pushされたタグにリリースを作る
+          tagName: ${{ github.ref_name }}
           releaseName: Lab Note v__VERSION__
           releaseBody: |
             ## インストール（macOS Apple Silicon）
