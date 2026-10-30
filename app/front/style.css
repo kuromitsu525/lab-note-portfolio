@@ -27,6 +27,32 @@ button, select, textarea { font: inherit; }
 button, select { transition: border-color .2s, background-color .2s, color .2s, box-shadow .2s, transform .2s; }
 button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(8,127,140,.2); outline-offset: 2px; }
 
+.workspace-side-actions { display: flex; align-items: stretch; gap: 8px; }
+.settings-button { position: relative; display: grid; flex: 0 0 44px; width: 44px; min-height: 44px; padding: 10px; place-items: center; color: #40545d; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px rgba(24,49,58,.08); cursor: pointer; }
+.settings-button:hover { color: var(--primary); border-color: #8bc6ca; transform: translateY(-1px); }
+.settings-button svg { width: 21px; height: 21px; fill: currentColor; }
+.settings-state { position: absolute; right: 1px; bottom: 1px; width: 9px; height: 9px; background: var(--danger); border: 2px solid white; border-radius: 50%; }
+.settings-button.configured .settings-state { background: #28a66a; }
+.settings-dialog { width: min(500px, calc(100% - 32px)); padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 70px rgba(16,35,43,.24); }
+.settings-dialog::backdrop { background: rgba(14,31,38,.42); backdrop-filter: blur(2px); }
+.settings-dialog form { padding: 22px; }
+.settings-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.settings-dialog-heading h2 { margin: 0; font-size: 20px; }
+.settings-dialog-heading p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.settings-close-button { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; color: var(--muted); background: var(--soft); border: 1px solid var(--line); border-radius: 50%; font-size: 24px; line-height: 1; cursor: pointer; }
+.settings-dialog label { margin-top: 14px; }
+.settings-dialog input { width: 100%; min-height: 42px; padding: 8px 11px; color: var(--text); background: white; border: 1px solid #cbd8dd; border-radius: 9px; font: inherit; }
+.settings-dialog input:focus { border-color: var(--primary); outline: 3px solid rgba(8,127,140,.15); }
+.settings-security-note { margin: 14px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.settings-message { min-height: 24px; margin: 10px 0 0; color: var(--primary-dark); font-size: 12px; }
+.settings-message.error { color: var(--danger); }
+.settings-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.settings-dialog-actions button { min-height: 39px; padding: 7px 13px; border-radius: 9px; font-weight: 700; cursor: pointer; }
+.settings-delete-button { margin-right: auto; color: var(--danger); background: #fff8f8; border: 1px solid #f2cbd0; }
+.settings-secondary-button { color: var(--primary-dark); background: var(--primary-soft); border: 1px solid #b9dfe1; }
+.settings-primary-button { color: white; background: var(--primary); border: 1px solid var(--primary); }
+.settings-dialog-actions button:disabled { cursor: wait; opacity: .55; }
+
 .system-status, .draft-badge { display: inline-flex; align-items: center; gap: 8px; color: var(--primary-dark); font-size: 13px; font-weight: 650; }
 .status-dot { width: 8px; height: 8px; background: #28a66a; border-radius: 50%; box-shadow: 0 0 0 4px rgba(40,166,106,.12); }
 
@@ -126,7 +152,7 @@ textarea::placeholder { color: #96a3a9; }
 .report-details { clear: both; max-height: 160px; margin: 10px 0 0; padding: 10px; overflow-y: auto; white-space: pre-wrap; color: #53656d; background: var(--soft); border-radius: 8px; font-size: 12px; }
 .report-details[hidden] { display: none; }
 
-.danger-button { width: 100%; min-height: 44px; padding: 10px 14px; color: var(--danger); background: #fff8f8; border: 1px solid #f2cbd0; font-size: 14px; }
+.danger-button { flex: 1; width: 100%; min-height: 44px; padding: 10px 14px; color: var(--danger); background: #fff8f8; border: 1px solid #f2cbd0; font-size: 14px; }
 .danger-button:hover:not(:disabled) { background: #fff1f2; border-color: #f2cbd0; }
 
 @media (max-width: 840px) {

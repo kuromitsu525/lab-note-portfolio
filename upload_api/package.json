@@ -2,6 +2,7 @@
   "name": "lab-note-worker",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --port 53103 --inspector-port 53113",

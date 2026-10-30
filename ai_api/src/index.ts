@@ -32,7 +32,7 @@ app.use("/api/*", cors({
     "https://tauri.localhost"
   ],
   allowMethods: ["GET", "POST", "OPTIONS"],
-  allowHeaders: ["Content-Type"]
+  allowHeaders: ["Content-Type", "CF-Access-Client-Id", "CF-Access-Client-Secret"]
 }));
 
 async function saveJobStatus(
@@ -134,7 +134,10 @@ async function resolvePresentationEsa(
       const posts = Array.isArray(data.posts) ? data.posts : [];
       totalPages = Number.isInteger(data.total_pages) && data.total_pages > 0 ? data.total_pages : 1;
       post = posts.find((candidate: any) => {
-        const pathParts = normalizeCategory(candidate.category).split("/");
+        const normalizedCategory = normalizeCategory(candidate.category);
+        const normalizedYearCategory = normalizeCategory(yearCategory);
+        if (!normalizedCategory.startsWith(`${normalizedYearCategory}/`)) return false;
+        const pathParts = normalizedCategory.split("/");
         const gradeIndex = pathParts.findIndex(part => part === speakerGrade.toLowerCase() || part.endsWith(`.${speakerGrade.toLowerCase()}`));
         if (gradeIndex < 0 || pathParts[gradeIndex + 1] !== speaker.toLowerCase()) return false;
         return dateCategories.some(([categoryMonth, categoryDay]) => pathParts.some((part, index) =>

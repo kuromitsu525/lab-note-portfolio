@@ -5,6 +5,7 @@
 # JavaScript dependencies and generated files
 node_modules/
 **/node_modules/
+.pnpm-store/
 npm-debug.log*
 
 # Python local environment and cache

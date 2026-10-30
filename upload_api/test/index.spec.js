@@ -19,6 +19,10 @@ describe("Lab Note worker", () => {
 		expect(response.status).toBe(204);
 		expect(response.headers.get("Access-Control-Allow-Origin"))
 			.toBe("http://127.0.0.1:1430");
+		expect(response.headers.get("Access-Control-Allow-Headers"))
+			.toContain("CF-Access-Client-Id");
+		expect(response.headers.get("Access-Control-Allow-Headers"))
+			.toContain("CF-Access-Client-Secret");
 	});
 
 	it("does not allow unknown origins", async () => {

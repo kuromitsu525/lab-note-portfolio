@@ -59,3 +59,26 @@ for dir in upload_api ai_api; do
   fi
 done
 '''
+
+[tasks."build:app"]
+description = "キーチェーンの証明書で署名してアプリをビルドする（追加の引数はtauri buildに渡す）"
+dir = "app"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+# APPLE_SIGNING_IDENTITYが未指定なら、Developer ID → Apple Developmentの順でキーチェーンから選ぶ
+if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  identities=$(security find-identity -v -p codesigning)
+  for kind in "Developer ID Application" "Apple Development"; do
+    APPLE_SIGNING_IDENTITY=$(printf '%s\n' "$identities" | sed -n "s/.*\"\($kind: .*\)\"/\1/p" | head -n1)
+    [ -n "$APPLE_SIGNING_IDENTITY" ] && break
+  done
+fi
+if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+  echo "署名に使える証明書がキーチェーンにありません" >&2
+  exit 1
+fi
+export APPLE_SIGNING_IDENTITY
+echo "署名に使う証明書: $APPLE_SIGNING_IDENTITY"
+pnpm tauri build "$@"
+'''

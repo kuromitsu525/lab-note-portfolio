@@ -59,7 +59,15 @@
                 </div>
 
                 <aside class="workspace-side">
-                    <button type="button" id="clearDraftButton" class="danger-button">記録をリセット</button>
+                    <div class="workspace-side-actions">
+                        <button type="button" id="clearDraftButton" class="danger-button">記録をリセット</button>
+                        <button type="button" id="settingsButton" class="settings-button" aria-label="Cloudflare Access設定を開く" title="設定">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 8.7a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Zm9 3.3-.1-1.2-2.2-.8a7.3 7.3 0 0 0-.7-1.6l1-2.1a9.4 9.4 0 0 0-1.7-1.7l-2.1 1a7.3 7.3 0 0 0-1.6-.7L12.8 2h-2.4l-.8 2.2a7.3 7.3 0 0 0-1.6.7l-2.1-1a9.4 9.4 0 0 0-1.7 1.7l1 2.1a7.3 7.3 0 0 0-.7 1.6l-2.2.8a9.8 9.8 0 0 0 0 2.4l2.2.8a7.3 7.3 0 0 0 .7 1.6l-1 2.1a9.4 9.4 0 0 0 1.7 1.7l2.1-1a7.3 7.3 0 0 0 1.6.7l.8 2.2h2.4l.8-2.2a7.3 7.3 0 0 0 1.6-.7l2.1 1a9.4 9.4 0 0 0 1.7-1.7l-1-2.1a7.3 7.3 0 0 0 .7-1.6l2.2-.8.1-1.2Z"/>
+                            </svg>
+                            <span id="settingsState" class="settings-state" aria-hidden="true"></span>
+                        </button>
+                    </div>
                     <section class="panel report-list-area">
                         <div class="section-heading compact">
                             <span class="step-number">3</span>
@@ -71,6 +79,33 @@
             </div>
         </div>
     </main>
+
+    <dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsTitle">
+        <form id="settingsForm">
+            <div class="settings-dialog-heading">
+                <div>
+                    <h2 id="settingsTitle">Cloudflare Access設定</h2>
+                    <p>Lab Note専用のService Tokenを設定します。</p>
+                </div>
+                <button type="button" id="closeSettingsButton" class="settings-close-button" aria-label="設定を閉じる">×</button>
+            </div>
+
+            <label for="cloudflareAccessClientId">Client ID</label>
+            <input type="text" id="cloudflareAccessClientId" autocomplete="off" autocapitalize="off" spellcheck="false">
+
+            <label for="cloudflareAccessClientSecret">Client Secret</label>
+            <input type="password" id="cloudflareAccessClientSecret" autocomplete="off" autocapitalize="off" spellcheck="false">
+
+            <p class="settings-security-note">設定はこの端末の安全な資格情報ストアに保存されます。ソースコードやGitには保存されません。</p>
+            <p id="settingsMessage" class="settings-message" role="status" aria-live="polite"></p>
+
+            <div class="settings-dialog-actions">
+                <button type="button" id="deleteSettingsButton" class="settings-delete-button">設定を削除</button>
+                <button type="button" id="testSettingsButton" class="settings-secondary-button">接続確認</button>
+                <button type="submit" id="saveSettingsButton" class="settings-primary-button">保存</button>
+            </div>
+        </form>
+    </dialog>
     <script src="script.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 
-const source = readFileSync(new URL("../../script.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../app/front/script.js", import.meta.url), "utf8");
 
 function setup(speaker = "kuro") {
   const listeners = {};
@@ -21,11 +21,17 @@ function setup(speaker = "kuro") {
     transcript: {addEventListener() {}}, transcriptHint: {},
     startButton: {disabled: false}, uploadButton: {addEventListener(type, fn) { listeners[type] = fn; }},
     isRecording: false, isCompletingTranscription: false, isUploadingReport: false,
+    cloudflareAccessCredentials: {clientId: "test-id", clientSecret: "test-secret"},
+    presentationEsaUrlInput: {value: ""},
     aiWorkerBaseURL: "http://localhost:53104", AbortController,
     console: {warn() {}},
     setTimeout(callback) { timeoutCallback = callback; return 1; },
     clearTimeout() { cleared++; },
     fetch: async (url, options) => {
+      requests.push({url, options});
+      return response(url, options);
+    },
+    fetchProtectedApi: async (url, options) => {
       requests.push({url, options});
       return response(url, options);
     },
